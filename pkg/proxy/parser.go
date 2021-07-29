@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -62,7 +63,7 @@ var _ ParseEngine = (*Parser)(nil)
 type Parser struct {
 	id           string
 	protocolType string
-	jmsService *service.JMService
+	jmsService   *service.JMService
 
 	userOutputChan chan []byte
 	srvOutputChan  chan []byte
@@ -87,8 +88,6 @@ type Parser struct {
 	closed         chan struct{}
 
 	confirmStatus commandConfirmStatus
-
-
 }
 
 func (p *Parser) initial() {
@@ -104,7 +103,6 @@ func (p *Parser) initial() {
 
 // ParseStream 解析数据流
 func (p *Parser) ParseStream(userInChan chan *exchange.RoomMessage, srvInChan <-chan []byte) (userOut, srvOut <-chan []byte) {
-
 	p.userOutputChan = make(chan []byte, 1)
 	p.srvOutputChan = make(chan []byte, 1)
 	logger.Infof("Session %s: Parser start", p.id)
@@ -159,6 +157,8 @@ func (p *Parser) ParseStream(userInChan chan *exchange.RoomMessage, srvInChan <-
 
 // parseInputState 切换用户输入状态, 并结算命令和结果
 func (p *Parser) parseInputState(b []byte) []byte {
+	fmt.Println("------>")
+	fmt.Println(hex.Dump(b))
 	if !p.IsNeedParse() {
 		return b
 	}
@@ -308,9 +308,11 @@ func (p *Parser) parseZmodemState(b []byte) {
 		if len(b) > 25 && bytes.Contains(b[:50], zmodemRecvStartMark) {
 			p.zmodemState = zmodemStateRecv
 			logger.Debug("Zmodem in recv state")
+			//fmt.Println(hex.Dump(b))
 		} else if bytes.Contains(b[:24], zmodemSendStartMark) {
 			p.zmodemState = zmodemStateSend
 			logger.Debug("Zmodem in send state")
+			//fmt.Println(hex.Dump(b))
 		}
 	} else {
 		if bytes.Contains(b[:24], zmodemEndMark) {
@@ -337,6 +339,8 @@ func (p *Parser) parseVimState(b []byte) {
 
 // splitCmdStream 将服务器输出流分离到命令buffer和命令输出buffer
 func (p *Parser) splitCmdStream(b []byte) {
+	fmt.Println("<------")
+	fmt.Println(hex.Dump(b))
 	p.parseVimState(b)
 	p.parseZmodemState(b)
 	if p.zmodemState != "" || p.inVimState || !p.inputInitial {
