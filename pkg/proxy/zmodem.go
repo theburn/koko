@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"github.com/jumpserver/koko/pkg/logger"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -259,6 +260,12 @@ const (
 	TypeDownload = "download"
 )
 
+const (
+	TransferStatusStart    = "start"
+	TransferStatusFinished = "end"
+	TransferStatusAbort    = "abort"
+)
+
 type ZFileInfo struct {
 	filename string
 	size     int
@@ -268,6 +275,8 @@ type ZSession struct {
 	Type        string
 	endCallback func()
 	zFileInfo   *ZFileInfo
+
+	transferStatus string
 
 	subPacketBuf bytes.Buffer
 
@@ -290,6 +299,11 @@ func (s *ZSession) consume(p []byte) {
 			return
 		}
 		fmt.Printf("未知的数据包")
+		return
+	}
+	if s.checkAbort(p) {
+
+		logger.Infof("Zmodem %s abort", s.Type)
 		return
 	}
 	if s.IsNeedSubPacket() {
@@ -528,7 +542,6 @@ func (z *ZmodemParser) ParseHexHeader(p []byte) *ZmodemHeader {
 	if len(hexBytes) != 18 {
 		return nil
 	}
-	// 去除无用的  HexHeaderPrefix
 	hexBytes = hexBytes[2:]
 	octets := ConvertHexToOctets(hexBytes)
 	return ParseNonZDLEBinary16(octets)
