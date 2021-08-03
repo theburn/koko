@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -20,13 +21,6 @@ import (
 )
 
 var (
-	//zmodemRecvStartMark = []byte("rz waiting to receive.**\x18B0100")
-	//zmodemSendStartMark = []byte("**\x18B00000000000000")
-	//zmodemCancelMark    = []byte("\x18\x18\x18\x18\x18")
-	//zmodemEndMark       = []byte("**\x18B0800000000022d")
-	//zmodemStateSend     = "send"
-	//zmodemStateRecv     = "recv"
-
 	charEnter = []byte("\r")
 
 	enterMarks = [][]byte{
@@ -63,7 +57,7 @@ type Parser struct {
 	inputInitial  bool
 	inputPreState bool
 	inputState    bool
-	//zmodemState   string
+
 	inVimState bool
 	once       *sync.Once
 	lock       *sync.RWMutex
@@ -79,7 +73,10 @@ type Parser struct {
 
 	confirmStatus commandConfirmStatus
 
-	zmodemParser ZmodemParser
+	zmodemParser   ZmodemParser
+	permAction     *model.Permission
+	enableDownload bool
+	enableUpload   bool
 }
 
 func (p *Parser) initial() {
@@ -90,6 +87,13 @@ func (p *Parser) initial() {
 	p.cmdOutputParser = NewCmdParser(p.id, CommandOutputParserName)
 	p.closed = make(chan struct{})
 	p.cmdRecordChan = make(chan *ExecutedCommand, 1024)
+	p.zmodemParser.setStatus(ZParserStatusNone)
+	p.zmodemParser.fileEventCallback = func(sessionType, filename string, size int, status bool) {
+		logger.Infof("file event %s %s %d %v", sessionType, filename, size, status)
+	}
+	//p.zmodemParser.zFileFrameCallback = func(filename string, size int) {
+	//	logger.Infof("file event %s %d", filename, size)
+	//}
 }
 
 // ParseStream 解析数据流
@@ -149,9 +153,23 @@ func (p *Parser) ParseStream(userInChan chan *exchange.RoomMessage, srvInChan <-
 // parseInputState 切换用户输入状态, 并结算命令和结果
 func (p *Parser) parseInputState(b []byte) []byte {
 	if p.zmodemParser.IsStartSession() {
-		if p.zmodemParser.CurrentStatus() == ZStatusReceive {
+		if p.zmodemParser.Status() == ZParserStatusReceive {
 			p.zmodemParser.Parse(b)
-			fmt.Println("parseInputState")
+			if p.zmodemParser.IsStartSession() && !p.enableUpload && p.zmodemParser.IsZFilePacket() {
+				logger.Infof("Send srv zmodem skip, disable upload ")
+				p.srvOutputChan <- skipSequence
+				return AbortSession
+			}
+		} else {
+			fmt.Println(hex.Dump(b))
+			if p.zmodemParser.IsStartSession() && !p.enableDownload && p.zmodemParser.IsZFilePacket() {
+				logger.Infof("Send srv zmodem skip, disable download ")
+				p.userOutputChan <- AbortSession
+				return skipSequence
+			}
+		}
+		if !p.zmodemParser.IsStartSession() {
+			return charEnter
 		}
 		return b
 	}
@@ -297,43 +315,14 @@ func (p *Parser) ParseUserInput(b []byte) []byte {
 // parseZmodemState 解析数据，查看是不是处于zmodem状态
 // 处于zmodem状态不会再解析命令
 func (p *Parser) parseZmodemState(b []byte) {
+	p.zmodemParser.Parse(b)
 	if p.zmodemParser.IsStartSession() {
-		if p.zmodemParser.CurrentStatus() == TypeDownload {
-			p.zmodemParser.Parse(b)
-		}
-	} else {
-		p.zmodemParser.Parse(b)
+		logger.Infof("Zmodem start session : %s", p.zmodemParser.Status())
 	}
-
-	if len(b) < 20 {
-		return
-	}
-	//if p.zmodemState == "" {
-	//	if len(b) > 25 && bytes.Contains(b[:50], zmodemRecvStartMark) {
-	//		p.zmodemState = zmodemStateRecv
-	//		logger.Debug("Zmodem in recv state")
-	//		//fmt.Println(hex.Dump(b))
-	//	} else if bytes.Contains(b[:24], zmodemSendStartMark) {
-	//		p.zmodemState = zmodemStateSend
-	//		logger.Debug("Zmodem in send state")
-	//		//fmt.Println(hex.Dump(b))
-	//	}
-	//} else {
-	//	if bytes.Contains(b[:24], zmodemEndMark) {
-	//		logger.Debug("Zmodem end")
-	//		p.zmodemState = ""
-	//	} else if bytes.Contains(b, zmodemCancelMark) {
-	//		logger.Debug("Zmodem cancel")
-	//		p.zmodemState = ""
-	//	}
-	//}
 }
 
 // parseVimState 解析vim的状态，处于vim状态中，里面输入的命令不再记录
 func (p *Parser) parseVimState(b []byte) {
-	if p.zmodemParser.IsStartSession() {
-		return
-	}
 	if !p.inVimState && IsEditEnterMode(b) {
 		p.inVimState = true
 		logger.Debug("In vim state: true")
@@ -345,21 +334,28 @@ func (p *Parser) parseVimState(b []byte) {
 }
 
 // splitCmdStream 将服务器输出流分离到命令buffer和命令输出buffer
-func (p *Parser) splitCmdStream(b []byte) {
+func (p *Parser) splitCmdStream(b []byte) []byte {
 
-	p.parseVimState(b)
-	p.parseZmodemState(b)
 	if p.zmodemParser.IsStartSession() {
-		return
+		if p.zmodemParser.Status() == ZParserStatusSend {
+			p.zmodemParser.Parse(b)
+		} else {
+			fmt.Println(hex.Dump(b))
+		}
+		return b
+	} else {
+		p.parseVimState(b)
+		p.parseZmodemState(b)
 	}
-	if p.inVimState || !p.inputInitial {
-		return
+	if p.inVimState || !p.inputInitial || p.zmodemParser.IsStartSession() {
+		return b
 	}
 	if p.inputState {
 		_, _ = p.cmdInputParser.WriteData(b)
-		return
+		return b
 	}
 	_, _ = p.cmdOutputParser.WriteData(b)
+	return b
 }
 
 // ParseServerOutput 解析服务器输出

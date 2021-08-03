@@ -154,6 +154,7 @@ func NewServer(conn UserConnection, jmsService *service.JMService, opts ...Conne
 		domainGateways  *model.Domain
 		expireInfo      *model.ExpireInfo
 		platform        *model.Platform
+		perms           *model.Permission
 	)
 
 	switch connOpts.ProtocolType {
@@ -190,6 +191,12 @@ func NewServer(conn UserConnection, jmsService *service.JMService, opts ...Conne
 		if err2 != nil {
 			return nil, fmt.Errorf("%w: %s", ErrAPIFailed, err2)
 		}
+		// 获取权限校验
+		permission, err3 := jmsService.GetPermission(connOpts.user.ID, connOpts.asset.ID, connOpts.systemUser.ID)
+		if err3 != nil {
+			return nil, fmt.Errorf("%w: %s", ErrAPIFailed, err3)
+		}
+		perms = &permission
 		platform = &assetPlatform
 		apiSession = &model.Session{
 			ID:           common.UUID(),
@@ -312,6 +319,7 @@ func NewServer(conn UserConnection, jmsService *service.JMService, opts ...Conne
 		domainGateways: domainGateways,
 		expireInfo:     expireInfo,
 		platform:       platform,
+		permActions:    perms,
 		CreateSessionCallback: func() error {
 			apiSession.DateStart = modelCommon.NewNowUTCTime()
 			return jmsService.CreateSession(*apiSession)
@@ -342,6 +350,7 @@ type Server struct {
 	domainGateways *model.Domain
 	expireInfo     *model.ExpireInfo
 	platform       *model.Platform
+	permActions    *model.Permission
 
 	cacheSSHConnection *srvconn.SSHConnection
 
@@ -359,11 +368,25 @@ func (s *Server) GetFilterParser() ParseEngine {
 	switch s.connOpts.ProtocolType {
 	case srvconn.ProtocolSSH,
 		srvconn.ProtocolTELNET, srvconn.ProtocolK8s:
+		enableUpload := false
+		enableDownload := false
+		if s.permActions != nil {
+			if s.permActions.EnableDownload() {
+				enableDownload = true
+			}
+			if s.permActions.EnableUpload() {
+				enableUpload = true
+			}
+		}
+
 		shellParser := Parser{
 			id:             s.ID,
 			protocolType:   s.connOpts.ProtocolType,
 			jmsService:     s.jmsService,
 			cmdFilterRules: s.filterRules,
+			permAction:     s.permActions,
+			enableDownload: enableDownload,
+			enableUpload:   enableUpload,
 		}
 		shellParser.initial()
 		return &shellParser

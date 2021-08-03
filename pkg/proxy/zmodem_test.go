@@ -1,6 +1,8 @@
 package proxy
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestDecodeB16FrameHeader(t *testing.T) {
 	//ZfileFrame := []byte{
@@ -15,16 +17,8 @@ func TestDecodeB16FrameHeader(t *testing.T) {
 		t.Fatal("decode frame failed")
 	}
 	switch h.Type {
-	case ZFileType:
+	case ZFILE:
 		t.Log("zfile type")
 	}
 	t.Logf("frame len: %d, parse offset: %d\n", len(jsFileFrame), offset)
-}
-
-func TestConvertHexToOctets(t *testing.T) {
-	//ZRINITHeader := []byte{
-	//	0x2a, 0x2a, 0x18, 0x42, 0x30, 0x31, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x32, 0x33, 0x62, 0x65, 0x35, 0x30, 0x0d, 0x8a,
-	//}
-	t.Logf("%+v", 1<<4)
-	t.Logf("%+v\n", HexOctetValue)
 }

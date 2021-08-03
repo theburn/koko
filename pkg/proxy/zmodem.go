@@ -2,12 +2,11 @@ package proxy
 
 import (
 	"bytes"
-	"encoding/hex"
-	"fmt"
-	"github.com/jumpserver/koko/pkg/logger"
 	"strconv"
 	"sync"
 	"sync/atomic"
+
+	"github.com/jumpserver/koko/pkg/logger"
 )
 
 //FRAME TYPES
@@ -134,8 +133,6 @@ Binary32 Header
 ZDLE C TYPE F3/P0 F2/P1	F1/P2 F0/P3 CRC-1 CRC-2	CRC-3 CRC-4
 
 */
-
-const ZFileType = 0x04
 
 var (
 	zSessionEnd = []byte{0x4f, 0x4f}
@@ -284,26 +281,28 @@ type ZSession struct {
 	haveEnd         bool
 	currentHd       *ZmodemHeader
 
-	ZFileEventCallback func(filename string, size int)
+	ZFileHeaderCallback func(filename string, size int)
+
+	zOnHeader func(hd *ZmodemHeader)
 }
 
 // zsession 入口
 func (s *ZSession) consume(p []byte) {
-	if s.IsGotZFin() {
+	if s.gotZFin() {
+		s.haveEnd = true
 		if bytes.Index(p, zSessionEnd) == 0 {
 			if s.endCallback != nil {
 				s.endCallback()
 			}
-			s.haveEnd = true
-			fmt.Println("获取到 OO 结束符号")
+			logger.Errorf("Zmodem session %s normally end", s.Type)
 			return
 		}
-		fmt.Printf("未知的数据包")
+		logger.Infof("Zmodem session %s abnormally finish", s.Type)
 		return
 	}
 	if s.checkAbort(p) {
-
-		logger.Infof("Zmodem %s abort", s.Type)
+		logger.Infof("Zmodem session %s abort", s.Type)
+		s.transferStatus = TransferStatusAbort
 		return
 	}
 	if s.IsNeedSubPacket() {
@@ -382,13 +381,12 @@ func (s *ZSession) consumeSubPacket() {
 
 func (s *ZSession) onSubPacket(p []byte) {
 	switch s.currentHd.Type {
-	case ZFileType:
-		fmt.Println(hex.Dump(p))
+	case ZFILE:
 		nonZDELData := p
 		var info ZFileInfo
 		filenameIndex := bytes.IndexByte(nonZDELData, 0x00)
 		if filenameIndex == -1 {
-			//fmt.Println("解析 rz sz 文件名 存在错误")
+			logger.Errorf("解析rz sz 文件名出错 %s", p)
 			break
 		}
 		info.filename = string(nonZDELData[:filenameIndex])
@@ -397,11 +395,13 @@ func (s *ZSession) onSubPacket(p []byte) {
 		if len(zFileOptions) >= 1 {
 			if size, err := strconv.Atoi(string(zFileOptions[0])); err == nil {
 				info.size = size
+			} else {
+				logger.Errorf("解析rz sz 文件名大小出错 %s", zFileOptions[0])
 			}
 		}
 		s.zFileInfo = &info
-		if s.ZFileEventCallback != nil {
-			s.ZFileEventCallback(info.filename, info.size)
+		if s.ZFileHeaderCallback != nil {
+			s.ZFileHeaderCallback(info.filename, info.size)
 		}
 	}
 	s.currentHd = nil
@@ -436,55 +436,74 @@ func (s *ZSession) getB32Header(p []byte) {
 
 func (s *ZSession) onHeader(hd *ZmodemHeader) {
 	switch hd.Type {
-	case ZFileType:
-		fmt.Println("获取到 Zfile 请求头，准备解析")
-	case ZFIN:
-		fmt.Println("获取到 ZFIN 请求头")
+	case ZFILE:
+		s.transferStatus = TransferStatusStart
 	case ZEOF:
+		s.transferStatus = TransferStatusFinished
+	case ZFIN:
+		s.haveEnd = true
+		if s.endCallback != nil {
+			s.endCallback()
+		}
 
+	}
+	if s.zOnHeader != nil {
+		s.zOnHeader(hd)
 	}
 	s.currentHd = hd
 	s.subPacketBuf.Reset()
-	fmt.Printf("获取到当前的 header type: %s\n", FrameType(hd.Type))
+	logger.Debugf("Zmodem Session type: %s receive header type: %s", s.Type, FrameType(hd.Type))
 }
 
 func (s *ZSession) IsEnd() bool {
-	return s.haveEnd
+	return s.haveEnd || s.transferStatus == TransferStatusAbort
 }
 
 func (s *ZSession) IsNeedSubPacket() bool {
-	return s.currentHd != nil && s.currentHd.Type == ZFileType
+	return s.currentHd != nil && s.currentHd.Type == ZFILE
 }
 
-func (s *ZSession) IsGotZFin() bool {
+func (s *ZSession) gotZFin() bool {
 	return s.currentHd != nil && s.currentHd.Type == ZFIN
 }
 
 const (
-	ZStatusNone    = "None"
-	ZStatusSend    = "SEND"
-	ZStatusReceive = "Receive"
+	ZParserStatusNone    = ""
+	ZParserStatusSend    = "Send"
+	ZParserStatusReceive = "Receive"
 )
 
 type ZmodemParser struct {
 	sync.Mutex
 	currentSession *ZSession
 
-	Status atomic.Value
+	status atomic.Value
+
+	fileEventCallback func(sessionType, filename string, size int, status bool)
+
+	filenameParsed bool
 }
 
 // rz sz 解析的入口
 
 func (z *ZmodemParser) Parse(p []byte) {
-	// todo 取消字符
 	z.Lock()
 	defer z.Unlock()
 	if z.IsStartSession() {
 		zSession := z.currentSession
 		zSession.consume(p)
 		if zSession.IsEnd() {
-			z.Status.Store(ZStatusNone)
+			z.setStatus(ZParserStatusNone)
 			z.currentSession = nil
+			if z.fileEventCallback != nil && zSession.zFileInfo != nil {
+				transferResult := false
+				if zSession.transferStatus == TransferStatusFinished {
+					transferResult = true
+				}
+				z.fileEventCallback(zSession.Type,
+					zSession.zFileInfo.filename,
+					zSession.zFileInfo.size, transferResult)
+			}
 		}
 		return
 	}
@@ -503,30 +522,54 @@ func (z *ZmodemParser) Parse(p []byte) {
 		z.currentSession = &ZSession{
 			Type: TypeDownload,
 			endCallback: func() {
-				z.currentSession = nil
+				z.setStatus(ZParserStatusNone)
+				z.filenameParsed = false
 			},
+			ZFileHeaderCallback: z.zFileFrameCallback,
 		}
-		z.Status.Store(ZStatusSend)
+		z.status.Store(ZParserStatusSend)
 	case ZRINIT:
 		z.currentSession = &ZSession{
 			Type: TypeUpload,
 			endCallback: func() {
-				z.currentSession = nil
+				z.setStatus(ZParserStatusNone)
+				z.filenameParsed = false
 			},
+			ZFileHeaderCallback: z.zFileFrameCallback,
 		}
-		z.Status.Store(ZStatusReceive)
+		z.setStatus(ZParserStatusReceive)
 	default:
 		z.currentSession = nil
-		z.Status.Store(ZStatusNone)
+		z.setStatus(ZParserStatusNone)
+		z.filenameParsed = false
 	}
 }
 
 func (z *ZmodemParser) IsStartSession() bool {
-	return z.Status.Load().(string) != ZStatusNone
+	return z.Status() != ZParserStatusNone
 }
 
-func (z *ZmodemParser) CurrentStatus() string {
-	return z.Status.Load().(string)
+func (z *ZmodemParser) Status() string {
+	return z.status.Load().(string)
+}
+func (z *ZmodemParser) setStatus(status string) {
+	z.status.Store(status)
+}
+
+func (z *ZmodemParser) SessionType() string {
+	if z.currentSession != nil {
+		return z.currentSession.Type
+	}
+	return ""
+}
+
+func (z *ZmodemParser) zFileFrameCallback(filename string, size int) {
+	z.filenameParsed = true
+	logger.Infof("filename: %s siz: %d", filename, size)
+}
+
+func (z *ZmodemParser) IsZFilePacket() bool {
+	return z.filenameParsed
 }
 
 func (z *ZmodemParser) ParseHexHeader(p []byte) *ZmodemHeader {
@@ -585,4 +628,12 @@ func InitHexOctetValue() map[byte]int {
 		ret[value] = i
 	}
 	return ret
+}
+
+var skipSequence = []byte{
+	0x2a, 0x2a, 0x18, 0x42,
+	0x30, 0x35, 0x30, 0x30,
+	0x30, 0x30, 0x30, 0x30,
+	0x36, 0x33, 0x37, 0x66,
+	0x39, 0x32, 0x0d, 0x8a, 0x11,
 }
