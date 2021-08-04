@@ -364,12 +364,41 @@ func (s *Server) CheckPermissionExpired(now time.Time) bool {
 	return s.expireInfo.ExpireAt < now.Unix()
 }
 
+func (s *Server) ZmodemFileTransferEvent(zinfo *ZFileInfo, status bool) {
+	switch s.connOpts.ProtocolType {
+	case srvconn.ProtocolTELNET, srvconn.ProtocolSSH:
+		operate := model.OperateDownload
+		switch zinfo.transferType {
+		case TypeUpload:
+			operate = model.OperateUpload
+		case TypeDownload:
+			operate = model.OperateDownload
+		}
+		item := model.FTPLog{
+			OrgID:      s.connOpts.asset.OrgID,
+			User:       s.connOpts.user.String(),
+			Hostname:   s.connOpts.asset.Hostname,
+			SystemUser: s.connOpts.systemUser.String(),
+			RemoteAddr: s.UserConn.RemoteAddr(),
+			Operate:    operate,
+			Path:       zinfo.filename,
+			DataStart:  modelCommon.NewUTCTime(zinfo.parserTime),
+			IsSuccess:  status,
+		}
+		if err := s.jmsService.CreateFileOperationLog(item); err != nil {
+			logger.Errorf("Create zmodem ftp log err: %s", err)
+		}
+	}
+}
+
 func (s *Server) GetFilterParser() ParseEngine {
 	switch s.connOpts.ProtocolType {
 	case srvconn.ProtocolSSH,
 		srvconn.ProtocolTELNET, srvconn.ProtocolK8s:
-		enableUpload := false
-		enableDownload := false
+		var (
+			enableUpload   bool
+			enableDownload bool
+		)
 		if s.permActions != nil {
 			if s.permActions.EnableDownload() {
 				enableDownload = true
@@ -378,7 +407,9 @@ func (s *Server) GetFilterParser() ParseEngine {
 				enableUpload = true
 			}
 		}
-
+		var zParser ZmodemParser
+		zParser.setStatus(ZParserStatusNone)
+		zParser.fileEventCallback = s.ZmodemFileTransferEvent
 		shellParser := Parser{
 			id:             s.ID,
 			protocolType:   s.connOpts.ProtocolType,
@@ -387,6 +418,7 @@ func (s *Server) GetFilterParser() ParseEngine {
 			permAction:     s.permActions,
 			enableDownload: enableDownload,
 			enableUpload:   enableUpload,
+			zmodemParser:   &zParser,
 		}
 		shellParser.initial()
 		return &shellParser

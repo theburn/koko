@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jumpserver/koko/pkg/logger"
 )
@@ -118,9 +119,9 @@ var (
 	Binary32HeaderPrefix = []byte{ZPAD, ZDLE, ZBIN32}
 
 	AbortSession = []byte{CAN, CAN, CAN, CAN, CAN}
-
-	CancelSequence = []byte{CAN, CAN, CAN, CAN, CAN, CAN, CAN, CAN,
-		0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0}
+	//
+	//CancelSequence = []byte{CAN, CAN, CAN, CAN, CAN, CAN, CAN, CAN,
+	//	0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0}
 )
 
 /*
@@ -266,6 +267,9 @@ const (
 type ZFileInfo struct {
 	filename string
 	size     int
+
+	parserTime   time.Time
+	transferType string
 }
 
 type ZSession struct {
@@ -281,7 +285,7 @@ type ZSession struct {
 	haveEnd         bool
 	currentHd       *ZmodemHeader
 
-	ZFileHeaderCallback func(filename string, size int)
+	ZFileHeaderCallback func(zInfo *ZFileInfo)
 
 	zOnHeader func(hd *ZmodemHeader)
 }
@@ -356,8 +360,11 @@ func (s *ZSession) consumeSubPacket() {
 		case ZCRCE, ZCRCG, ZCRCQ, ZCRCW:
 			if gotZDLE {
 				endSubPacket = true
+			} else {
+				s.parsedSubPacket = append(s.parsedSubPacket, buf[i])
 			}
 		case 0x91, 0x13, 0x11:
+			gotZDLE = false
 			continue
 		default:
 			if gotZDLE {
@@ -372,7 +379,6 @@ func (s *ZSession) consumeSubPacket() {
 			break
 		}
 	}
-
 	s.subPacketBuf.Reset()
 	s.subPacketBuf.Write(buf[offset+1:])
 	s.onSubPacket(s.parsedSubPacket)
@@ -390,6 +396,8 @@ func (s *ZSession) onSubPacket(p []byte) {
 			break
 		}
 		info.filename = string(nonZDELData[:filenameIndex])
+		info.parserTime = time.Now()
+		info.transferType = s.Type
 		remain := nonZDELData[filenameIndex+1:]
 		zFileOptions := bytes.Split(remain, []byte{0x20})
 		if len(zFileOptions) >= 1 {
@@ -401,7 +409,7 @@ func (s *ZSession) onSubPacket(p []byte) {
 		}
 		s.zFileInfo = &info
 		if s.ZFileHeaderCallback != nil {
-			s.ZFileHeaderCallback(info.filename, info.size)
+			s.ZFileHeaderCallback(&info)
 		}
 	}
 	s.currentHd = nil
@@ -479,9 +487,11 @@ type ZmodemParser struct {
 
 	status atomic.Value
 
-	fileEventCallback func(sessionType, filename string, size int, status bool)
+	fileEventCallback func(zinfo *ZFileInfo, status bool)
 
-	filenameParsed bool
+	currentZFileInfo *ZFileInfo
+
+	currentHeader *ZmodemHeader
 }
 
 // rz sz 解析的入口
@@ -496,13 +506,11 @@ func (z *ZmodemParser) Parse(p []byte) {
 			z.setStatus(ZParserStatusNone)
 			z.currentSession = nil
 			if z.fileEventCallback != nil && zSession.zFileInfo != nil {
-				transferResult := false
+				transferStatus := false
 				if zSession.transferStatus == TransferStatusFinished {
-					transferResult = true
+					transferStatus = true
 				}
-				z.fileEventCallback(zSession.Type,
-					zSession.zFileInfo.filename,
-					zSession.zFileInfo.size, transferResult)
+				z.fileEventCallback(zSession.zFileInfo, transferStatus)
 			}
 		}
 		return
@@ -523,9 +531,9 @@ func (z *ZmodemParser) Parse(p []byte) {
 			Type: TypeDownload,
 			endCallback: func() {
 				z.setStatus(ZParserStatusNone)
-				z.filenameParsed = false
 			},
 			ZFileHeaderCallback: z.zFileFrameCallback,
+			zOnHeader:           z.OnHeader,
 		}
 		z.status.Store(ZParserStatusSend)
 	case ZRINIT:
@@ -533,15 +541,14 @@ func (z *ZmodemParser) Parse(p []byte) {
 			Type: TypeUpload,
 			endCallback: func() {
 				z.setStatus(ZParserStatusNone)
-				z.filenameParsed = false
 			},
 			ZFileHeaderCallback: z.zFileFrameCallback,
+			zOnHeader:           z.OnHeader,
 		}
 		z.setStatus(ZParserStatusReceive)
 	default:
 		z.currentSession = nil
 		z.setStatus(ZParserStatusNone)
-		z.filenameParsed = false
 	}
 }
 
@@ -563,13 +570,20 @@ func (z *ZmodemParser) SessionType() string {
 	return ""
 }
 
-func (z *ZmodemParser) zFileFrameCallback(filename string, size int) {
-	z.filenameParsed = true
-	logger.Infof("filename: %s siz: %d", filename, size)
+func (z *ZmodemParser) OnHeader(hd *ZmodemHeader) {
+	z.currentHeader = hd
+}
+func (z *ZmodemParser) zFileFrameCallback(info *ZFileInfo) {
+	z.currentZFileInfo = info
+	logger.Infof("Zmodem parser got filename: %s siz: %d", info.filename, info.size)
 }
 
 func (z *ZmodemParser) IsZFilePacket() bool {
-	return z.filenameParsed
+	return z.currentHeader != nil && z.currentHeader.Type == ZFILE
+}
+
+func (z *ZmodemParser) GetCurrentZFileInfo() *ZFileInfo {
+	return z.currentZFileInfo
 }
 
 func (z *ZmodemParser) ParseHexHeader(p []byte) *ZmodemHeader {
