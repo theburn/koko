@@ -28,7 +28,10 @@ type WindowSize struct {
 const (
 	TargetTypeAsset = "asset"
 
-	TargetTypeRoom = "shareroom"
+	// TargetTypeMonitor todo: 前端参数将 统一修改成 monitor
+	TargetTypeMonitor = "shareroom"
+
+	TargetTypeShare = "share"
 )
 
 const (

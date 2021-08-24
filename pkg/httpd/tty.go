@@ -51,8 +51,10 @@ func (h *tty) CleanUp() {
 func (h *tty) CheckValidation() bool {
 	var ok bool
 	switch h.targetType {
-	case TargetTypeRoom:
+	case TargetTypeMonitor:
 		ok = h.CheckShareRoomReadPerm(h.ws.user.ID, h.targetId)
+	case TargetTypeShare:
+		ok = h.CheckShareRoomWritePerm(h.ws.user.ID, h.targetId)
 	default:
 		if h.systemUserId == "" || h.targetId == "" {
 			logger.Errorf("Ws[%s] miss required query params.", h.ws.Uuid)
@@ -187,7 +189,9 @@ func (h *tty) getTargetApp(protocol string) bool {
 func (h *tty) proxy(wg *sync.WaitGroup) {
 	defer wg.Done()
 	switch h.targetType {
-	case TargetTypeRoom:
+	case TargetTypeMonitor:
+		h.Monitor(h.backendClient, h.targetId)
+	case TargetTypeShare:
 		h.JoinRoom(h.backendClient, h.targetId)
 	default:
 		proxyOpts := make([]proxy.ConnectionOption, 0, 4)
@@ -210,6 +214,7 @@ func (h *tty) proxy(wg *sync.WaitGroup) {
 		srv.Proxy()
 	}
 	h.sendCloseMessage()
+	logger.Info("Ws tty proxy end")
 }
 
 func (h *tty) CheckShareRoomReadPerm(uerId, roomId string) bool {
@@ -225,8 +230,8 @@ func (h *tty) CheckShareRoomReadPerm(uerId, roomId string) bool {
 }
 
 func (h *tty) CheckShareRoomWritePerm(uid, roomId string) bool {
-	// todo: check current user has pem to write
-	return false
+	// todo: 检查是否有权限操作
+	return h.targetType != TargetTypeMonitor
 }
 
 func (h *tty) JoinRoom(c *Client, roomID string) {
@@ -253,4 +258,8 @@ func (h *tty) JoinRoom(c *Client, roomID string) {
 		}
 		logger.Infof("Conn[%s] user read end", c.ID())
 	}
+}
+
+func (h *tty) Monitor(c *Client, roomID string) {
+	h.JoinRoom(c, roomID)
 }

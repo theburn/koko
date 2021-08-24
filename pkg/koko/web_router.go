@@ -12,7 +12,6 @@ import (
 	"github.com/jumpserver/koko/pkg/config"
 	"github.com/jumpserver/koko/pkg/httpd"
 	"github.com/jumpserver/koko/pkg/jms-sdk-go/service"
-
 )
 
 func registerWebHandlers(jmsService *service.JMService, webSrv *httpd.Server) {
