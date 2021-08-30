@@ -12,5 +12,4 @@ export default {
 </script>
 
 <style>
-@import './assets/styles/index.css';
 </style>
