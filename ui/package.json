@@ -10,9 +10,12 @@
   },
   "dependencies": {
     "core-js": "^3.6.5",
+    "element-ui": "^2.15.5",
     "nora-zmodemjs": "^1.1.1",
+    "v-contextmenu": "^2.9.0",
     "vue": "^2.6.11",
     "vue-router": "^3.5.2",
+    "vue-runtime-helpers": "^1.1.2",
     "vuejs-logger": "^1.5.5",
     "xterm": "^4.13.0",
     "xterm-addon-fit": "^0.5.0"

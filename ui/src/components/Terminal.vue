@@ -1,11 +1,46 @@
 <template>
-  <div id="term"></div>
+  <div>
+    <el-row>
+      <el-col :span="23">
+        <div id="term"></div>
+      </el-col>
+      <el-col :span="1">
+        <div v-contextmenu:contextmenu style="color: white">右键点击此区域</div>
+      </el-col>
+    </el-row>
+    <el-dialog
+        title="上传文件"
+        :visible.sync="zmodeDialog"
+        @close="dialogCloseCallback"
+        center>
+      <el-row>
+        <el-col :span="8" :offset="4">
+              <el-upload drag action="#" :auto-upload="false" :multiple="false" ref="upload"
+                         :on-change="handleFileChange">
+                <i class="el-icon-upload"></i>
+                <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>
+              </el-upload>
+
+        </el-col>
+      </el-row>
+      <div slot="footer" >
+        <el-button @click="closeZmodemDialog">取 消</el-button>
+        <el-button type="primary" @click="uploadSubmit">上传</el-button>
+      </div>
+    </el-dialog>
+    <v-contextmenu ref="contextmenu">
+      <v-contextmenu-item>菜单1</v-contextmenu-item>
+      <v-contextmenu-item>菜单2</v-contextmenu-item>
+      <v-contextmenu-item>菜单3</v-contextmenu-item>
+    </v-contextmenu>
+  </div>
+
 </template>
 
 <script>
 import 'xterm/css/xterm.css'
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
+import {Terminal} from 'xterm';
+import {FitAddon} from 'xterm-addon-fit';
 import ZmodemBrowser from "nora-zmodemjs/src/zmodem_browser";
 
 function decodeToStr(octets) {
@@ -13,6 +48,22 @@ function decodeToStr(octets) {
     return new TextDecoder("utf-8").decode(new Uint8Array(octets))
   }
   return decodeURIComponent(escape(String.fromCharCode.apply(null, octets)));
+}
+
+function fireEvent(e) {
+  window.dispatchEvent(e)
+}
+
+function bytesHuman(bytes, precision) {
+  if (!/^([-+])?|(\.\d+)(\d+(\.\d+)?|(\d+\.)|Infinity)$/.test(bytes)) {
+    return '-'
+  }
+  if (bytes === 0) return '0';
+  if (typeof precision === 'undefined') precision = 1;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB', 'BB'];
+  const num = Math.floor(Math.log(bytes) / Math.log(1024));
+  const value = (bytes / Math.pow(1024, Math.floor(num))).toFixed(precision);
+  return `${value} ${units[num]}`
 }
 
 const MaxTimeout = 30 * 1000
@@ -29,13 +80,18 @@ export default {
       pingInterval: null,
       lastReceiveTime: null,
       lastSendTime: null,
-      config:null,
+      config: null,
+      zmodeDialog: false,
+      zmodeSession: null,
+      fileList: [],
+      initialed: false,
+      uploading:false,
     }
   },
   mounted: function () {
     const wsURL = this.getConnectURL();
-    this.config = this.loadConfig();
     this.connect(wsURL)
+    this.registerJMSEvent()
   },
   methods: {
     createTerminal() {
@@ -57,10 +113,14 @@ export default {
       fitAddon.fit();
       term.focus();
       this.fitAddon = fitAddon;
-      window.onresize = () => {
+      termRef.addEventListener('resize', () => {
         this.fitAddon.fit();
         this.$log.debug("Windows resize event", term.cols, term.rows, term)
-      }
+      })
+      termRef.addEventListener('mouseenter', () => {
+        term.focus();
+        term.scrollToBottom()
+      })
       return term
     },
 
@@ -82,68 +142,48 @@ export default {
       return wsURL
     },
 
-    connect(wsURL) {
-      const ws = new WebSocket(wsURL, ["JMS-KOKO"]);
-      this.$log.debug(wsURL)
-      this.term = this.createTerminal("terminal");
+    registerJMSEvent() {
       window.addEventListener('jmsFocus', evt => {
-        this.$log.debug(evt);
-        this.term.focus()
-        this.term.scrollToBottom()
+        this.$log.debug("jmsFocus ", evt);
+        if (this.term) {
+          this.term.focus()
+          this.term.scrollToBottom()
+        }
       })
+    },
+
+    connect(wsURL) {
+      this.$log.debug(wsURL)
+      const ws = new WebSocket(wsURL, ["JMS-KOKO"]);
+      this.config = this.loadConfig();
+      this.term = this.createTerminal();
       this.$log.debug(ZmodemBrowser);
-      const zsentry = new ZmodemBrowser.Sentry({
+      this.zsentry = new ZmodemBrowser.Sentry({
         to_terminal: (octets) => {
-          if (!zsentry.get_confirmed_session()) {
+          if (this.zsentry && !this.zsentry.get_confirmed_session()) {
             this.term.write(decodeToStr(octets));
           }
         },
         sender: (octets) => {
+          this.lastSendTime = new Date();
           this.ws.send(new Uint8Array(octets));
         },
         on_retract: () => {
           console.log('zmodem Retract')
         },
         on_detect: (detection) => {
-          var promise;
-          let file_input_el;
-          var zsession = detection.confirm();
+          const zsession = detection.confirm();
           this.term.write("\r\n")
           if (zsession.type === "send") {
-            // 动态创建 input 标签，否则选择相同的文件，不会触发 onchang 事件
-            file_input_el = document.createElement("input");
-            file_input_el.type = "file";
-            file_input_el.style.display = "none";//隐藏
-            document.body.appendChild(file_input_el);
-            document.body.onfocus = function () {
-              document.body.onfocus = null;
-              setTimeout(function () {
-                // 如果未选择任何文件，则代表取消上传。主动取消
-                if (file_input_el.files.length === 0) {
-                  console.log("Cancel file clicked")
-                  if (!zsession.aborted()) {
-                    zsession.abort()
-                  }
-                }
-              }, 1000);
-            }
-            promise = this._handle_send_session(file_input_el, zsession);
+            this.handleSendSession(zsession);
           } else {
-            promise = this._handle_receive_session(zsession);
+            this.handleReceiveSession(zsession);
           }
-          promise.catch(console.error.bind(console)).then(() => {
-            console.log("zmodem Detect promise finished")
-          }).finally(() => {
-            if (file_input_el != null) {
-              document.body.removeChild(file_input_el);
-            }
-          })
-
         }
       });
 
       this.term.onData(data => {
-        if (this.initialed === null || this.ws === null) {
+        if (!this.initialed || this.ws === null) {
           return
         }
         this.lastSendTime = new Date();
@@ -152,7 +192,7 @@ export default {
       });
 
       this.term.onResize(({cols, rows}) => {
-        if (this.initialed === null || this.ws === null) {
+        if (!this.initialed || this.ws === null) {
           return
         }
         this.$log.debug("send term resize ")
@@ -160,49 +200,57 @@ export default {
       })
       this.ws = ws;
       ws.binaryType = "arraybuffer";
-      ws.onopen = () => {
-        if (this.pingInterval !== null) {
-          clearInterval(this.pingInterval);
-        }
-        this.lastReceiveTime = new Date();
-        this.pingInterval = setInterval(() => {
-          if (this.ws.readyState === WebSocket.CLOSING ||
-              this.ws.readyState === WebSocket.CLOSED) {
-            clearInterval(this.pingInterval)
-            return
-          }
-          let currentDate = new Date();
-          if ((this.lastReceiveTime - currentDate) > MaxTimeout) {
-            console.log("more than 30s do not receive data")
-          }
-          let pingTimeout = (currentDate - this.lastSendTime) - MaxTimeout
-          if (pingTimeout < 0) {
-            return;
-          }
-          this.ws.send(this.message(this.terminalId, 'PING', ""));
-        }, 25 * 1000);
-      }
-      ws.onerror = (e) => {
-        this.term.writeln("Connection websocket error");
-        this.fireEvent(new Event("CLOSE", {}))
-        this.handleError(e)
-      }
-      ws.onclose = (e) => {
-        this.term.writeln("Connection websocket closed");
-        this.fireEvent(new Event("CLOSE", {}))
-        this.handleError(e)
-      }
-      ws.onmessage = (e) => {
-        this.lastReceiveTime = new Date();
-        if (typeof e.data === 'object') {
-          zsentry.consume(e.data);
-        } else {
-          this.dispatch(this.term, e.data);
-        }
+      ws.onopen = this.onWebsocketOpen;
+      ws.onerror = this.onWebsocketErr;
+      ws.onclose = this.onWebsocketClose;
+      ws.onmessage = this.onWebsocketMessage;
+    },
+
+    onWebsocketMessage(e) {
+      this.lastReceiveTime = new Date();
+      if (typeof e.data === 'object') {
+        this.zsentry.consume(e.data);
+      } else {
+        this.dispatch(e.data);
       }
     },
 
-    dispatch(term, data) {
+    onWebsocketOpen() {
+      if (this.pingInterval !== null) {
+        clearInterval(this.pingInterval);
+      }
+      this.lastReceiveTime = new Date();
+      this.pingInterval = setInterval(() => {
+        if (this.ws.readyState === WebSocket.CLOSING ||
+            this.ws.readyState === WebSocket.CLOSED) {
+          clearInterval(this.pingInterval)
+          return
+        }
+        let currentDate = new Date();
+        if ((this.lastReceiveTime - currentDate) > MaxTimeout) {
+          this.$log.debug("more than 30s do not receive data")
+        }
+        let pingTimeout = (currentDate - this.lastSendTime) - MaxTimeout
+        if (pingTimeout < 0) {
+          return;
+        }
+        this.ws.send(this.message(this.terminalId, 'PING', ""));
+      }, 25 * 1000);
+    },
+
+    onWebsocketErr(e){
+      this.term.writeln("Connection websocket error");
+      fireEvent(new Event("CLOSE", {}))
+      this.handleError(e)
+    },
+
+    onWebsocketClose(e){
+      this.term.writeln("Connection websocket closed");
+      fireEvent(new Event("CLOSE", {}))
+      this.handleError(e)
+    },
+
+    dispatch(data) {
       if (data === undefined) {
         return
       }
@@ -220,7 +268,7 @@ export default {
         }
         case "CLOSE":
           this.term.writeln("Receive Connection closed");
-          this.fireEvent(new Event("CLOSE", {}))
+          fireEvent(new Event("CLOSE", {}))
           break
         case "PING":
           break
@@ -235,10 +283,6 @@ export default {
         type,
         data,
       });
-    },
-
-    fireEvent(e) {
-      window.dispatchEvent(e)
     },
 
     handleError(e) {
@@ -263,7 +307,7 @@ export default {
       config['quickPaste'] = quickPaste;
       return config
     },
-    
+
     loadConfig() {
       const config = this.loadLunaConfig();
       const ua = navigator.userAgent.toLowerCase();
@@ -273,6 +317,120 @@ export default {
       }
       config['lineHeight'] = lineHeight
       return config
+    },
+
+    handleFileChange(file, fileList) {
+      if (fileList.length > 1) {
+        fileList.shift()
+      }
+      const filesObj = fileList.map(el => el.raw);
+      this.$log.debug(filesObj);
+
+      this.$log.debug(file, fileList)
+      this.fileList = fileList
+    },
+
+    handleReceiveSession(zsession) {
+      zsession.on('offer', xfer => {
+        const on_form_submit = () => {
+          // 开始下载
+          const buffer = [];
+          xfer.on('input', payload => {
+            // 下载中
+            this.updateReceiveProgress(xfer);
+            buffer.push(new Uint8Array(payload));
+          });
+          xfer.accept().then(() => {
+            this.saveToDisk(xfer, buffer);
+          }, console.error.bind(console));
+        };
+
+        on_form_submit();
+      });
+      zsession.on('session_end', () => {
+        this.term.write('\r\n')
+      });
+      zsession.start();
+    },
+
+    saveToDisk(xfer, buffer) {
+      ZmodemBrowser.Browser.save_to_disk(buffer, xfer.get_details().name);
+    },
+    updateReceiveProgress(xfer) {
+      let detail = xfer.get_details();
+      let name = detail.name;
+      let total = detail.size;
+      let offset = xfer.get_offset();
+      let percent;
+      if (total === 0 || total === offset) {
+        percent = 100
+      } else {
+        percent = Math.round(offset / total * 100);
+      }
+      let msg = 'download ' + name + ": " + bytesHuman(total) + " " + percent + "%"
+      this.term.write("\r" + msg);
+    },
+    updateSendProgress(xfer, percent) {
+      let detail = xfer.get_details();
+      let name = detail.name;
+      let total = detail.size;
+       percent = Math.round(percent);
+      let msg = 'upload ' +  name + ": " + bytesHuman(total) + " " + percent + "%"
+      this.term.write("\r" + msg);
+    },
+    handleSendSession(zsession) {
+      this.zmodeSession = zsession;
+      this.openZmodemDialog()
+
+      zsession.on('session_end', () => {
+        this.zmodeSession = null;
+        this.fileList = [];
+        this.term.write('\r\n')
+      });
+    },
+
+    uploadSubmit() {
+      this.uploading = true;
+      this.closeZmodemDialog()
+      if (!this.zmodeSession) {
+        return
+      }
+      const filesObj = this.fileList.map(el => el.raw);
+      this.$log.debug("Zomdem submit file: ", filesObj)
+      ZmodemBrowser.Browser.send_files(this.zmodeSession, filesObj,
+          {
+            on_offer_response: (obj, xfer) => {
+              if (xfer) {
+                xfer.on('send_progress', (percent) => {
+                  this.updateSendProgress(xfer, percent)
+                });
+              }
+            },
+            on_file_complete(obj) {
+              console.log("COMPLETE", obj);
+            },
+          }
+      ).then(
+          this.zmodeSession.close.bind(this.zmodeSession),
+          console.error.bind(console)
+      ).catch(err => {
+        console.log(err)
+      });
+    },
+
+    dialogCloseCallback() {
+      if (this.zmodeSession && !this.uploading) {
+        this.$log.debug("dialog close callback zmodeSession abort")
+        this.zmodeSession.abort();
+      }
+      this.$refs.upload.clearFiles();
+      this.uploading = false;
+    },
+    openZmodemDialog() {
+      this.zmodeDialog = true;
+    },
+    closeZmodemDialog() {
+      this.zmodeDialog = false;
     }
   }
 }
@@ -280,6 +438,10 @@ export default {
 
 <style scoped>
 @import '../assets/styles/index.css';
+
+div {
+  height: 100%;
+}
 
 #term {
   height: 100%;
