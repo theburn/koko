@@ -1,10 +1,17 @@
 <template>
+  <div>
 
+  </div>
 </template>
 
 <script>
 export default {
-  name: "MonitorTerminal"
+  name: "MonitorTerminal",
+  data(){
+    return {
+
+    }
+  }
 }
 </script>
 

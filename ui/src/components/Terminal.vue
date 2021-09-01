@@ -11,19 +11,20 @@
     <el-dialog
         title="上传文件"
         :visible.sync="zmodeDialog"
-        @close="dialogCloseCallback"
+        :close-on-press-escape="false"
+        :close-on-click-modal="false"
+        :show-close="false"
         center>
       <el-row>
         <el-col :span="8" :offset="4">
-              <el-upload drag action="#" :auto-upload="false" :multiple="false" ref="upload"
-                         :on-change="handleFileChange">
-                <i class="el-icon-upload"></i>
-                <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>
-              </el-upload>
-
+          <el-upload drag action="#" :auto-upload="false" :multiple="false" ref="upload" :file-list="fileList"
+                     :on-change="handleFileChange">
+            <i class="el-icon-upload"></i>
+            <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>
+          </el-upload>
         </el-col>
       </el-row>
-      <div slot="footer" >
+      <div slot="footer">
         <el-button @click="closeZmodemDialog">取 消</el-button>
         <el-button type="primary" @click="uploadSubmit">上传</el-button>
       </div>
@@ -85,7 +86,6 @@ export default {
       zmodeSession: null,
       fileList: [],
       initialed: false,
-      uploading:false,
     }
   },
   mounted: function () {
@@ -238,13 +238,13 @@ export default {
       }, 25 * 1000);
     },
 
-    onWebsocketErr(e){
+    onWebsocketErr(e) {
       this.term.writeln("Connection websocket error");
       fireEvent(new Event("CLOSE", {}))
       this.handleError(e)
     },
 
-    onWebsocketClose(e){
+    onWebsocketClose(e) {
       this.term.writeln("Connection websocket closed");
       fireEvent(new Event("CLOSE", {}))
       this.handleError(e)
@@ -332,20 +332,16 @@ export default {
 
     handleReceiveSession(zsession) {
       zsession.on('offer', xfer => {
-        const on_form_submit = () => {
-          // 开始下载
-          const buffer = [];
-          xfer.on('input', payload => {
-            // 下载中
-            this.updateReceiveProgress(xfer);
-            buffer.push(new Uint8Array(payload));
-          });
-          xfer.accept().then(() => {
-            this.saveToDisk(xfer, buffer);
-          }, console.error.bind(console));
-        };
-
-        on_form_submit();
+        const buffer = [];
+        const detail = xfer.get_details();
+        xfer.on('input', payload => {
+          this.updateReceiveProgress(xfer);
+          buffer.push(new Uint8Array(payload));
+        });
+        xfer.accept().then(() => {
+          this.saveToDisk(xfer, buffer);
+          this.$message("下载成功：" + detail.name)
+        }, console.error.bind(console));
       });
       zsession.on('session_end', () => {
         this.term.write('\r\n')
@@ -374,13 +370,13 @@ export default {
       let detail = xfer.get_details();
       let name = detail.name;
       let total = detail.size;
-       percent = Math.round(percent);
-      let msg = 'upload ' +  name + ": " + bytesHuman(total) + " " + percent + "%"
+      percent = Math.round(percent);
+      let msg = 'upload ' + name + ": " + bytesHuman(total) + " " + percent + "%"
       this.term.write("\r" + msg);
     },
     handleSendSession(zsession) {
       this.zmodeSession = zsession;
-      this.openZmodemDialog()
+      this.zmodeDialog = true;
 
       zsession.on('session_end', () => {
         this.zmodeSession = null;
@@ -390,8 +386,11 @@ export default {
     },
 
     uploadSubmit() {
-      this.uploading = true;
-      this.closeZmodemDialog()
+      if (this.fileList.length === 0) {
+        this.$message("必须选择一个文件")
+        return;
+      }
+      this.zmodeDialog = false;
       if (!this.zmodeSession) {
         return
       }
@@ -406,31 +405,24 @@ export default {
                 });
               }
             },
-            on_file_complete(obj) {
-              console.log("COMPLETE", obj);
+            on_file_complete: (obj) => {
+              this.$log.debug("file_complete", obj);
+              this.$message("上传成功：" + obj.name)
             },
           }
-      ).then(
-          this.zmodeSession.close.bind(this.zmodeSession),
+      ).then(this.zmodeSession.close.bind(this.zmodeSession),
           console.error.bind(console)
       ).catch(err => {
         console.log(err)
       });
     },
 
-    dialogCloseCallback() {
-      if (this.zmodeSession && !this.uploading) {
-        this.$log.debug("dialog close callback zmodeSession abort")
-        this.zmodeSession.abort();
-      }
-      this.$refs.upload.clearFiles();
-      this.uploading = false;
-    },
-    openZmodemDialog() {
-      this.zmodeDialog = true;
-    },
     closeZmodemDialog() {
       this.zmodeDialog = false;
+      if (this.zmodeSession) {
+        this.$log.debug("cancel abort")
+        this.zmodeSession.abort();
+      }
     }
   }
 }

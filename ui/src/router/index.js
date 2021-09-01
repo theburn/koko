@@ -14,10 +14,6 @@ export const allRoleRoutes = [
     component: () => import('../components/Terminal')
   },
   {
-    path: '/elfinder/',
-    component: () => import('../components/Elfinder')
-  },
-  {
     path: '/token/',
     component: () => import('../components/Terminal')
   }
