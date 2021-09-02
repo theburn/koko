@@ -1023,7 +1023,7 @@ func (s *Server) Proxy() {
 		logger.Errorf("Conn[%s] update session %s err: %s", s.UserConn.ID(), s.ID, err2)
 	}
 	if s.OnSessionInfo != nil {
-		s.OnSessionInfo(SessionInfo{ID: s.ID, EnableShare: s.terminalConf.EnableShareRoom})
+		go s.OnSessionInfo(SessionInfo{ID: s.ID, EnableShare: s.terminalConf.EnableShareRoom})
 	}
 	utils.IgnoreErrWriteWindowTitle(s.UserConn, s.connOpts.TerminalTitle())
 	if err = sw.Bridge(s.UserConn, srvCon); err != nil {
