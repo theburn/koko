@@ -3,26 +3,29 @@
 </template>
 
 <script>
-import Terminal from '@/components/Terminal'
+import Terminal from "@/components/Terminal";
 import {BASE_WS_URL} from "@/utils/common";
 
 export default {
-  components:{
+  components: {
     Terminal,
   },
-  name: "ShareTerminal",
+  name: "MonitorTerminal",
+  data() {
+    return {}
+  },
   computed: {
-    wsURL(){
+    wsURL() {
       return this.getConnectURL()
     }
   },
-  methods:{
+  methods: {
     getConnectURL() {
       const params = this.$route.params
       const requireParams = new URLSearchParams();
-      requireParams.append('type', "share");
+      requireParams.append('type', "shareroom");
       requireParams.append('target_id', params.id);
-      return BASE_WS_URL + "/koko/ws/terminal/?" + requireParams.toString()
+      return `${BASE_WS_URL}/koko/ws/terminal/?${requireParams.toString()}`
     },
   }
 }

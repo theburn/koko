@@ -1,39 +1,31 @@
 <template>
   <div>
     <el-row>
-      <el-col :span="23">
+      <el-col>
         <div id="term"></div>
-      </el-col>
-      <el-col :span="1">
-        <div v-contextmenu:contextmenu style="color: white">右键点击此区域</div>
       </el-col>
     </el-row>
     <el-dialog
-        title="上传文件"
-        :visible.sync="zmodeDialog"
+        :title="this.$t('Terminal.UploadTitle')"
+        :visible.sync="zmodeDialogVisible"
         :close-on-press-escape="false"
         :close-on-click-modal="false"
         :show-close="false"
         center>
       <el-row>
         <el-col :span="8" :offset="4">
-          <el-upload drag action="#" :auto-upload="false" :multiple="false" ref="upload" :file-list="fileList"
+          <el-upload drag action="#" :auto-upload="false" :multiple="false" ref="upload"
                      :on-change="handleFileChange">
             <i class="el-icon-upload"></i>
-            <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>
+            <div class="el-upload__text">{{ this.$t('Terminal.UploadTips') }}</div>
           </el-upload>
         </el-col>
       </el-row>
       <div slot="footer">
-        <el-button @click="closeZmodemDialog">取 消</el-button>
-        <el-button type="primary" @click="uploadSubmit">上传</el-button>
+        <el-button @click="closeZmodemDialog">{{ this.$t('Terminal.Cancel') }}</el-button>
+        <el-button type="primary" @click="uploadSubmit">{{ this.$t('Terminal.Upload') }}</el-button>
       </div>
     </el-dialog>
-    <v-contextmenu ref="contextmenu">
-      <v-contextmenu-item>菜单1</v-contextmenu-item>
-      <v-contextmenu-item>菜单2</v-contextmenu-item>
-      <v-contextmenu-item>菜单3</v-contextmenu-item>
-    </v-contextmenu>
   </div>
 
 </template>
@@ -43,54 +35,31 @@ import 'xterm/css/xterm.css'
 import {Terminal} from 'xterm';
 import {FitAddon} from 'xterm-addon-fit';
 import ZmodemBrowser from "nora-zmodemjs/src/zmodem_browser";
-
-function decodeToStr(octets) {
-  if (typeof TextEncoder == "function") {
-    return new TextDecoder("utf-8").decode(new Uint8Array(octets))
-  }
-  return decodeURIComponent(escape(String.fromCharCode.apply(null, octets)));
-}
-
-function fireEvent(e) {
-  window.dispatchEvent(e)
-}
-
-function bytesHuman(bytes, precision) {
-  if (!/^([-+])?|(\.\d+)(\d+(\.\d+)?|(\d+\.)|Infinity)$/.test(bytes)) {
-    return '-'
-  }
-  if (bytes === 0) return '0';
-  if (typeof precision === 'undefined') precision = 1;
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB', 'BB'];
-  const num = Math.floor(Math.log(bytes) / Math.log(1024));
-  const value = (bytes / Math.pow(1024, Math.floor(num))).toFixed(precision);
-  return `${value} ${units[num]}`
-}
+import {bytesHuman, decodeToStr, fireEvent} from '@/utils/common'
 
 const MaxTimeout = 30 * 1000
 export default {
   name: "Terminal",
+  props: {
+    connectURL: String,
+  },
   data() {
     return {
-      wsURL: '',
-      params: '',
+      wsURL: this.connectURL,
       term: null,
       fitAddon: null,
       ws: null,
-      disable_rz_sz: false,
       pingInterval: null,
       lastReceiveTime: null,
       lastSendTime: null,
       config: null,
-      zmodeDialog: false,
+      zmodeDialogVisible: false,
       zmodeSession: null,
       fileList: [],
-      initialed: false,
     }
   },
   mounted: function () {
-    const wsURL = this.getConnectURL();
-    this.connect(wsURL)
+    this.connect()
     this.registerJMSEvent()
   },
   methods: {
@@ -123,25 +92,6 @@ export default {
       })
       return term
     },
-
-    getConnectURL() {
-      let urlParams = new URLSearchParams(window.location.search.slice(1));
-      let scheme = document.location.protocol === "https:" ? "wss" : "ws";
-      let port = document.location.port ? ":" + document.location.port : "";
-      let baseWsUrl = scheme + "://" + document.location.hostname + port;
-      let wsURL = baseWsUrl + '/koko/ws/terminal/?' + urlParams.toString();
-      switch (urlParams.get("type")) {
-        case 'token':
-          wsURL = baseWsUrl + "/koko/ws/token/?" + urlParams.toString();
-          break
-        case 'shareroom':
-          this.disable_rz_sz = true
-          break
-        default:
-      }
-      return wsURL
-    },
-
     registerJMSEvent() {
       window.addEventListener('jmsFocus', evt => {
         this.$log.debug("jmsFocus ", evt);
@@ -152,9 +102,9 @@ export default {
       })
     },
 
-    connect(wsURL) {
-      this.$log.debug(wsURL)
-      const ws = new WebSocket(wsURL, ["JMS-KOKO"]);
+    connect() {
+      this.$log.debug(this.wsURL)
+      const ws = new WebSocket(this.wsURL, ["JMS-KOKO"]);
       this.config = this.loadConfig();
       this.term = this.createTerminal();
       this.$log.debug(ZmodemBrowser);
@@ -165,6 +115,10 @@ export default {
           }
         },
         sender: (octets) => {
+          if (!this.wsIsActivated()) {
+            this.$log.debug("websocket closed")
+            return
+          }
           this.lastSendTime = new Date();
           this.ws.send(new Uint8Array(octets));
         },
@@ -183,7 +137,8 @@ export default {
       });
 
       this.term.onData(data => {
-        if (!this.initialed || this.ws === null) {
+        if (!this.wsIsActivated()) {
+          this.$log.debug("websocket closed")
           return
         }
         this.lastSendTime = new Date();
@@ -192,7 +147,7 @@ export default {
       });
 
       this.term.onResize(({cols, rows}) => {
-        if (!this.initialed || this.ws === null) {
+        if (!this.wsIsActivated()) {
           return
         }
         this.$log.debug("send term resize ")
@@ -263,7 +218,6 @@ export default {
           const rows = this.term.rows;
           this.ws.send(this.message(this.terminalId, 'TERMINAL_INIT',
               JSON.stringify({cols, rows})));
-          this.initialed = true;
           break
         }
         case "CLOSE":
@@ -275,6 +229,11 @@ export default {
         default:
           console.log(data)
       }
+    },
+
+    wsIsActivated(){
+     return this.ws && (!( this.ws.readyState === WebSocket.CLOSING ||
+          this.ws.readyState === WebSocket.CLOSED))
     },
 
     message(id, type, data) {
@@ -323,9 +282,6 @@ export default {
       if (fileList.length > 1) {
         fileList.shift()
       }
-      const filesObj = fileList.map(el => el.raw);
-      this.$log.debug(filesObj);
-
       this.$log.debug(file, fileList)
       this.fileList = fileList
     },
@@ -340,7 +296,7 @@ export default {
         });
         xfer.accept().then(() => {
           this.saveToDisk(xfer, buffer);
-          this.$message("下载成功：" + detail.name)
+          this.$message(this.$t("Terminal.DownloadSuccess") + " " + detail.name)
         }, console.error.bind(console));
       });
       zsession.on('session_end', () => {
@@ -363,7 +319,7 @@ export default {
       } else {
         percent = Math.round(offset / total * 100);
       }
-      let msg = 'download ' + name + ": " + bytesHuman(total) + " " + percent + "%"
+      let msg = this.$t('Terminal.Download') + ' ' + name + ': ' + bytesHuman(total) + ' ' + percent + "%"
       this.term.write("\r" + msg);
     },
     updateSendProgress(xfer, percent) {
@@ -371,12 +327,12 @@ export default {
       let name = detail.name;
       let total = detail.size;
       percent = Math.round(percent);
-      let msg = 'upload ' + name + ": " + bytesHuman(total) + " " + percent + "%"
+      let msg = this.$t('Terminal.Upload') + ' ' + name + ': ' + bytesHuman(total) + ' ' + percent + "%"
       this.term.write("\r" + msg);
     },
     handleSendSession(zsession) {
       this.zmodeSession = zsession;
-      this.zmodeDialog = true;
+      this.zmodeDialogVisible = true;
 
       zsession.on('session_end', () => {
         this.zmodeSession = null;
@@ -387,10 +343,10 @@ export default {
 
     uploadSubmit() {
       if (this.fileList.length === 0) {
-        this.$message("必须选择一个文件")
+        this.$message(this.$t("Terminal.MustSelectOneFile"))
         return;
       }
-      this.zmodeDialog = false;
+      this.zmodeDialogVisible = false;
       if (!this.zmodeSession) {
         return
       }
@@ -407,7 +363,7 @@ export default {
             },
             on_file_complete: (obj) => {
               this.$log.debug("file_complete", obj);
-              this.$message("上传成功：" + obj.name)
+              this.$message(this.$t('Terminal.UploadSuccess') + ' ' + obj.name)
             },
           }
       ).then(this.zmodeSession.close.bind(this.zmodeSession),
@@ -418,18 +374,19 @@ export default {
     },
 
     closeZmodemDialog() {
-      this.zmodeDialog = false;
+      this.zmodeDialogVisible = false;
       if (this.zmodeSession) {
         this.$log.debug("cancel abort")
         this.zmodeSession.abort();
       }
+      this.$refs.upload.clearFiles();
     }
   }
 }
 </script>
 
 <style scoped>
-@import '../assets/styles/index.css';
+@import '../styles/index.css';
 
 div {
   height: 100%;

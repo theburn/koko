@@ -3,19 +3,22 @@ import Router from 'vue-router'
 
 Vue.use(Router)
 
-export const constantRoutes = []
-
-/**
- * the routes
- */
 export const allRoleRoutes = [
   {
     path: '/terminal/',
-    component: () => import('../components/Terminal')
+    component: () => import('../views/Connection')
   },
   {
-    path: '/token/',
-    component: () => import('../components/Terminal')
+    path: '/token/:id/',
+    component: () => import('../views/TokenConnection')
+  },
+  {
+    path: '/share/:id/',
+    component: () => import('../views/ShareTerminal')
+  },
+  {
+    path: '/monitor/:id/',
+    component: () => import('../views/Monitor')
   }
 ]
 
