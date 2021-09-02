@@ -361,6 +361,8 @@ type Server struct {
 	DisConnectedCallback     func() error
 
 	keyboardMode int32
+
+	OnSessionInfo func(info SessionInfo)
 }
 
 func (s *Server) IsKeyboardMode() bool {
@@ -1019,6 +1021,9 @@ func (s *Server) Proxy() {
 	logger.Infof("Conn[%s] create session %s success", s.UserConn.ID(), s.ID)
 	if err2 := s.ConnectedSuccessCallback(); err2 != nil {
 		logger.Errorf("Conn[%s] update session %s err: %s", s.UserConn.ID(), s.ID, err2)
+	}
+	if s.OnSessionInfo != nil {
+		s.OnSessionInfo(SessionInfo{ID: s.ID, EnableShare: s.terminalConf.EnableShareRoom})
 	}
 	utils.IgnoreErrWriteWindowTitle(s.UserConn, s.connOpts.TerminalTitle())
 	if err = sw.Bridge(s.UserConn, srvCon); err != nil {

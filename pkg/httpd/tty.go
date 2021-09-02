@@ -124,6 +124,15 @@ func (h *tty) sendCloseMessage() {
 	h.ws.SendMessage(&closedMsg)
 }
 
+func (h *tty) sendSessionMessage(data string) {
+	msg := Message{
+		Id:   h.ws.Uuid,
+		Type: TERMINALSESSION,
+		Data: data,
+	}
+	h.ws.SendMessage(&msg)
+}
+
 func (h *tty) handleTerminalMessage(msg *Message) {
 	switch msg.Type {
 	case TERMINALDATA:
@@ -210,6 +219,10 @@ func (h *tty) proxy(wg *sync.WaitGroup) {
 		if err != nil {
 			logger.Errorf("Create proxy server failed: %s", err)
 			return
+		}
+		srv.OnSessionInfo = func(info proxy.SessionInfo) {
+			data, _ := json.Marshal(info)
+			h.sendSessionMessage(string(data))
 		}
 		srv.Proxy()
 	}

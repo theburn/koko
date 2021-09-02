@@ -27,3 +27,25 @@ body ::-webkit-scrollbar-thumb {
   height: 100%;
   width: 100%;
 }
+
+.el-container {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+}
+
+.el-main {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+}
+
+.el-aside {
+  height: 100%;
+}
+
+.menu-list li {
+  cursor: pointer;
+}

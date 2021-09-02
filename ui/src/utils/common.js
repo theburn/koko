@@ -2,8 +2,8 @@
 const scheme = document.location.protocol === "https:" ? "wss" : "ws";
 const port = document.location.port ? ':' + document.location.port : '';
 const BASE_WS_URL = scheme + '://' + document.location.hostname + port;
-
-export { BASE_WS_URL }
+const BASE_URL = document.location.protocol+ '//'+ document.location.hostname + port;
+export { BASE_WS_URL, BASE_URL }
 
 export function decodeToStr(octets) {
     if (typeof TextEncoder == "function") {
@@ -26,4 +26,14 @@ export function bytesHuman(bytes, precision) {
     const num = Math.floor(Math.log(bytes) / Math.log(1024));
     const value = (bytes / Math.pow(1024, Math.floor(num))).toFixed(precision);
     return `${value} ${units[num]}`
+}
+
+export function CopyTextToClipboard(text){
+    let transfer = document.createElement('input');
+    document.body.appendChild(transfer);
+    transfer.value =text;
+    transfer.focus();
+    transfer.select();
+    document.execCommand('copy');
+    document.body.removeChild(transfer);
 }

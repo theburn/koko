@@ -16,3 +16,8 @@ type UserConnection interface {
 	Pty() ssh.Pty
 	Context() context.Context
 }
+
+type SessionInfo struct {
+	ID          string `json:"id"`
+	EnableShare bool   `json:"enable_share"`
+}

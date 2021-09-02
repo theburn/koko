@@ -1,10 +1,6 @@
 <template>
   <div>
-    <el-row>
-      <el-col>
-        <div id="term"></div>
-      </el-col>
-    </el-row>
+    <div id="term"></div>
     <el-dialog
         :title="this.$t('Terminal.UploadTitle')"
         :visible.sync="zmodeDialogVisible"
@@ -12,14 +8,12 @@
         :close-on-click-modal="false"
         :show-close="false"
         center>
-      <el-row>
-        <el-col :span="8" :offset="4">
+      <el-row type="flex"  justify="center">
           <el-upload drag action="#" :auto-upload="false" :multiple="false" ref="upload"
                      :on-change="handleFileChange">
             <i class="el-icon-upload"></i>
             <div class="el-upload__text">{{ this.$t('Terminal.UploadTips') }}</div>
           </el-upload>
-        </el-col>
       </el-row>
       <div slot="footer">
         <el-button @click="closeZmodemDialog">{{ this.$t('Terminal.Cancel') }}</el-button>
@@ -82,7 +76,7 @@ export default {
       fitAddon.fit();
       term.focus();
       this.fitAddon = fitAddon;
-      termRef.addEventListener('resize', () => {
+      window.addEventListener('resize', () => {
         this.fitAddon.fit();
         this.$log.debug("Windows resize event", term.cols, term.rows, term)
       })
@@ -225,6 +219,11 @@ export default {
           fireEvent(new Event("CLOSE", {}))
           break
         case "PING":
+          break
+        case "TERMINAL_SESSION":{
+          let session = JSON.parse(msg.data)
+          this.$emit('session-data', session)
+        }
           break
         default:
           console.log(data)

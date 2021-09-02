@@ -7,6 +7,7 @@ import i18n from './i18n/i18n'
 import loggerOptions from './plugins/logger'
 import ElementUI from 'element-ui'
 import 'element-ui/lib/theme-chalk/index.css';
+import 'element-ui/lib/theme-chalk/display.css';
 import contextmenu from "v-contextmenu";
 import "v-contextmenu/dist/index.css";
 import VueCookies from 'vue-cookies'

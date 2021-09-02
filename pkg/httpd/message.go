@@ -18,11 +18,16 @@ const (
 	TERMINALDATA   = "TERMINAL_DATA"
 	TERMINALRESIZE = "TERMINAL_RESIZE"
 	TERMINALBINARY = "TERMINAL_BINARY"
+	TERMINALSESSION = "TERMINAL_SESSION"
 )
 
 type WindowSize struct {
 	Cols int `json:"cols"`
 	Rows int `json:"rows"`
+}
+
+type SessionData struct {
+	ID string `json:"id"`
 }
 
 const (

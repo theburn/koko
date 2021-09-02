@@ -6,18 +6,22 @@ Vue.use(Router)
 export const allRoleRoutes = [
   {
     path: '/terminal/',
+    name: 'Terminal',
     component: () => import('../views/Connection')
   },
   {
     path: '/token/:id/',
-    component: () => import('../views/TokenConnection')
+    name: 'Token',
+    component: () => import('../views/Connection')
   },
   {
     path: '/share/:id/',
+    name: 'Share',
     component: () => import('../views/ShareTerminal')
   },
   {
     path: '/monitor/:id/',
+    name: 'Monitor',
     component: () => import('../views/Monitor')
   }
 ]
