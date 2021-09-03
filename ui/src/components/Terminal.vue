@@ -8,12 +8,12 @@
         :close-on-click-modal="false"
         :show-close="false"
         center>
-      <el-row type="flex"  justify="center">
-          <el-upload drag action="#" :auto-upload="false" :multiple="false" ref="upload"
-                     :on-change="handleFileChange">
-            <i class="el-icon-upload"></i>
-            <div class="el-upload__text">{{ this.$t('Terminal.UploadTips') }}</div>
-          </el-upload>
+      <el-row type="flex" justify="center">
+        <el-upload drag action="#" :auto-upload="false" :multiple="false" ref="upload"
+                   :on-change="handleFileChange">
+          <i class="el-icon-upload"></i>
+          <div class="el-upload__text">{{ this.$t('Terminal.UploadTips') }}</div>
+        </el-upload>
       </el-row>
       <div slot="footer">
         <el-button @click="closeZmodemDialog">{{ this.$t('Terminal.Cancel') }}</el-button>
@@ -220,19 +220,18 @@ export default {
           break
         case "PING":
           break
-        case "TERMINAL_SESSION":{
-          let session = JSON.parse(msg.data)
-          this.$emit('session-data', session)
-        }
-          break
         default:
           console.log(data)
       }
+      this.$emit('ws-data', msg.type, msg)
     },
 
-    wsIsActivated(){
-     return this.ws && (!( this.ws.readyState === WebSocket.CLOSING ||
-          this.ws.readyState === WebSocket.CLOSED))
+    wsIsActivated() {
+      if (this.ws) {
+        return !(this.ws.readyState === WebSocket.CLOSING ||
+            this.ws.readyState === WebSocket.CLOSED)
+      }
+      return false
     },
 
     message(id, type, data) {
@@ -379,6 +378,12 @@ export default {
         this.zmodeSession.abort();
       }
       this.$refs.upload.clearFiles();
+    },
+    sendWsMessage(type, data) {
+      if (this.wsIsActivated()) {
+        this.ws.send(this.message(this.terminalId, type,
+            JSON.stringify(data)))
+      }
     }
   }
 }
