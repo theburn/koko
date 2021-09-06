@@ -5,6 +5,13 @@ import "encoding/json"
 type RoomMessage struct {
 	Event string `json:"event"`
 	Body  []byte `json:"data"`
+
+	Meta MetaInfo `json:"meta"`
+}
+
+type MetaInfo struct {
+	UserId   string `json:"user_id"`
+	Username string `json:"username"`
 }
 
 func (m RoomMessage) Marshal() []byte {
@@ -21,11 +28,14 @@ const (
 	DataEvent    = "Data"
 	WindowsEvent = "Windows"
 
-	JoinEvent        = "Join"
-	LeaveEvent       = "Leave"
+	JoinEvent  = "Join"
+	LeaveEvent = "Leave"
 
-	ExitEvent        = "Exit"
+	ExitEvent = "Exit"
 
 	JoinSuccessEvent = "JoinSuccess"
 
+	ShareTyping = "Share_TYPING"
+	ShareJoin   = "Share_JOIN"
+	ShareLeave  = "Share_LEAVE"
 )

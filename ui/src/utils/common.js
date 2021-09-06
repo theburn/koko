@@ -29,7 +29,7 @@ export function bytesHuman(bytes, precision) {
 }
 
 export function CopyTextToClipboard(text){
-    let transfer = document.createElement('input');
+    let transfer = document.createElement('textarea');
     document.body.appendChild(transfer);
     transfer.value =text;
     transfer.focus();

@@ -12,6 +12,8 @@ import (
 var _ io.WriteCloser = (*redisChannel)(nil)
 
 type redisChannel struct {
+	Id string
+
 	roomId string
 
 	writeChannel string
@@ -68,5 +70,12 @@ func (s *redisChannel) addSubscribeCount(i int) {
 	select {
 	case <-s.done:
 	case s.count <- i:
+	}
+}
+
+func (s *redisChannel) HandleRoomEvent(event string, msg *RoomMessage) {
+	err := s.sendMessage(msg)
+	if err != nil {
+		logger.Errorf("Redis send event room %s err: %s", s.roomId, err)
 	}
 }

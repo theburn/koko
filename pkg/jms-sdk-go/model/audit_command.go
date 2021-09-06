@@ -13,7 +13,7 @@ type Command struct {
 	Timestamp  int64  `json:"timestamp"`
 	RiskLevel  int64  `json:"risk_level"`
 	Owner      string `json:"owner"` //  用户 user(username)
-	OwnerID    string `json:"owner_id"`
+	OwnerID    string `json:"owner_id"` // 用户id
 
 	DateCreated time.Time `json:"@timestamp"`
 }

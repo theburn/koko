@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gliderlabs/ssh"
 
@@ -17,6 +18,8 @@ import (
 )
 
 var _ Handler = (*tty)(nil)
+
+var cache = map[string]string{}
 
 type tty struct {
 	ws *UserWebsocket
@@ -35,6 +38,8 @@ type tty struct {
 	backendClient *Client
 
 	jmsService *service.JMService
+
+	shareInfo *ShareInfo
 }
 
 func (h *tty) Name() string {
@@ -89,17 +94,27 @@ func (h *tty) HandleMessage(msg *Message) {
 			return
 		}
 
-		var size WindowSize
-		err := json.Unmarshal([]byte(msg.Data), &size)
+		var connectInfo TerminalConnectData
+		err := json.Unmarshal([]byte(msg.Data), &connectInfo)
 		if err != nil {
 			logger.Errorf("Ws[%s] terminal initial message data unmarshal err: %s",
 				h.ws.Uuid, err)
 			return
 		}
+		if h.targetType == TargetTypeShare {
+			code := connectInfo.Code
+			info, err2 := h.ValidateShareParams(h.targetId, code)
+			if err2 != nil {
+				logger.Errorf("Ws[%s] terminal initial message data unmarshal err: %s",
+					h.ws.Uuid, err)
+				return
+			}
+			h.shareInfo = &info
+		}
 		h.initialed = true
 		win := ssh.Window{
-			Width:  size.Cols,
-			Height: size.Rows,
+			Width:  connectInfo.Cols,
+			Height: connectInfo.Rows,
 		}
 		userR, userW := io.Pipe()
 		h.backendClient = &Client{
@@ -151,12 +166,70 @@ func (h *tty) handleTerminalMessage(msg *Message) {
 			Width:  size.Cols,
 			Height: size.Rows,
 		})
+	case TERMINALSHARE:
+		var shareData ShareRequestParams
+
+		err := json.Unmarshal([]byte(msg.Data), &shareData)
+		if err != nil {
+			logger.Errorf("Ws[%s] message(%s) data unmarshal err: %s", h.ws.Uuid,
+				msg.Type, msg.Data)
+			return
+		}
+		logger.Debugf("Ws[%s] receive share request %s", h.ws.Uuid, msg.Data)
+		go func() {
+			// 创建 共享连接
+			res, err2 := h.handleShareRequest(shareData)
+			if err2 != nil {
+				logger.Errorf("Ws[%s] handle share request err: %s", h.ws.Uuid, err)
+				return
+			}
+			logger.Infof("Ws[%s] handle share request %+v", h.ws.Uuid, res)
+			data, _ := json.Marshal(res)
+			h.ws.SendMessage(&Message{
+				Id:   h.ws.Uuid,
+				Type: TERMINALSHARE,
+				Data: string(data),
+			})
+		}()
+		return
+
 	case CLOSE:
 		_ = h.backendClient.Close()
 	default:
 		logger.Infof("Ws[%s] handle unknown message(%s) data %s", h.ws.Uuid,
 			msg.Type, msg.Data)
 	}
+}
+
+func (h *tty) handleShareRequest(data ShareRequestParams) (res ShareResponse, err error) {
+	// todo 发请求，获取地址和校验码
+	//time.Sleep(5 * time.Second)
+	//res.ShareId = common.UUID()
+	//res.Code = "12345"
+	//id := res.ShareId + res.Code
+	//cache[id] = data.SessionID
+
+	res2, err := h.jmsService.CreateShare(data.SessionID, data.ExpireTime)
+	if err != nil {
+		logger.Error(err)
+		return res, err
+	}
+	res.ShareId = res2.ID
+	res.Code = res2.Code
+	return
+}
+
+func (h *tty) ValidateShareParams(shareId, code string) (info ShareInfo, err error) {
+	// todo 校验 shareId 和 code
+	time.Sleep(2 * time.Second)
+	id := shareId + code
+	sid := cache[id]
+	return ShareInfo{
+		ShareId:   shareId,
+		Code:      code,
+		SessionId: sid,
+	}, nil
+
 }
 
 func (h *tty) getTargetApp(protocol string) bool {
@@ -201,7 +274,8 @@ func (h *tty) proxy(wg *sync.WaitGroup) {
 	case TargetTypeMonitor:
 		h.Monitor(h.backendClient, h.targetId)
 	case TargetTypeShare:
-		h.JoinRoom(h.backendClient, h.targetId)
+		roomID := h.shareInfo.SessionId
+		h.JoinRoom(h.backendClient, roomID)
 	default:
 		proxyOpts := make([]proxy.ConnectionOption, 0, 4)
 		proxyOpts = append(proxyOpts, proxy.ConnectProtocolType(h.systemUser.Protocol))
@@ -244,7 +318,7 @@ func (h *tty) CheckShareRoomReadPerm(uerId, roomId string) bool {
 
 func (h *tty) CheckShareRoomWritePerm(uid, roomId string) bool {
 	// todo: 检查是否有权限操作
-	return h.targetType != TargetTypeMonitor
+	return h.shareInfo != nil
 }
 
 func (h *tty) JoinRoom(c *Client, roomID string) {
@@ -254,7 +328,7 @@ func (h *tty) JoinRoom(c *Client, roomID string) {
 		3. client emit msg to room
 	*/
 	if room := exchange.GetRoom(roomID); room != nil {
-		conn := exchange.WrapperUserCon(c)
+		conn := exchange.WrapperUserCon(c.ID(), c)
 		room.Subscribe(conn)
 		defer room.UnSubscribe(conn)
 		for {

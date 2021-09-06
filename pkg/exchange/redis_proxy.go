@@ -7,6 +7,7 @@ import (
 	"github.com/jumpserver/koko/pkg/logger"
 )
 
+//
 func proxyRoom(room *Room, ch *redisChannel, userInputCh chan *RoomMessage) {
 	maxIdleTime := time.Minute * 30
 	tick := time.NewTicker(time.Second * 30)
@@ -56,11 +57,12 @@ func proxyRoom(room *Room, ch *redisChannel, userInputCh chan *RoomMessage) {
 	}
 }
 
+// 接受其他 koko 的数据 给 Room
 func proxyUserCon(room *Room, ch *redisChannel) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	currentNumber := 1
-	con := WrapperUserCon(ch)
+	con := WrapperUserCon("",ch)
 	room.Subscribe(con)
 	defer func() {
 		room.UnSubscribe(con)
@@ -88,6 +90,7 @@ func proxyUserCon(room *Room, ch *redisChannel) {
 			}
 			var msg RoomMessage
 			_ = json.Unmarshal(redisMsg.Message, &msg)
+			//  todo: 代理所有的用户的信息 信息中携带用户信息
 			room.Receive(&msg)
 		}
 	}

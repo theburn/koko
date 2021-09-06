@@ -2,10 +2,13 @@ package httpd
 
 import (
 	"context"
+	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
 	"io"
 	"sync"
 
 	"github.com/gliderlabs/ssh"
+
+	"github.com/jumpserver/koko/pkg/exchange"
 )
 
 type Client struct {
@@ -74,10 +77,22 @@ func (c *Client) ID() string {
 	return c.Conn.Uuid
 }
 
+func (c *Client) GetUser() *model.User {
+	return c.Conn.user
+}
+
 func (c *Client) WriteData(p []byte) {
 	_, _ = c.UserWrite.Write(p)
 }
 
 func (c *Client) Context() context.Context {
 	return c.Conn.ctx.Request.Context()
+}
+
+func (c *Client) HandleRoomEvent(event string, msg *exchange.RoomMessage) {
+	switch event {
+	case exchange.ShareTyping:
+	case exchange.ShareJoin:
+	case exchange.ShareLeave:
+	}
 }

@@ -53,12 +53,12 @@
         <template slot="extra">
         </template>
       </el-result>
-      <el-form  v-if="shareId" >
+      <el-form v-if="shareId">
         <el-form-item label="地址">
-          <el-input  readonly  :value="shareURL"/>
+          <el-input readonly :value="shareURL"/>
         </el-form-item>
         <el-form-item label="验证码">
-          <el-input readonly  :value="shareCode"/>
+          <el-input readonly :value="shareCode"/>
         </el-form-item>
       </el-form>
       <span slot="footer" class="dialog-footer">
@@ -97,6 +97,8 @@ export default {
       loading: false,
       shareCode: null,
       shareCode2: '#ffffff',
+      shareInfo: null,
+      onlineShareInfo: null,
     }
   },
   computed: {
@@ -149,23 +151,35 @@ export default {
       }
       const shareURL = this.generateShareURL();
       this.$log.debug("share URL: " + shareURL)
-      CopyTextToClipboard(shareURL)
+      const text = `地址： ${shareURL}\n验证码: ${this.shareCode}`
+      CopyTextToClipboard(text)
       this.$message(this.$t("Terminal.CopyShareURLSuccess"))
     },
 
     onWsData(msgType, msg) {
-      switch (msg.type) {
+      switch (msgType) {
         case "TERMINAL_SESSION": {
-          const data = msg.data;
+          const data = JSON.parse(msg.data);
           this.sessionId = data.id;
           this.enableShare = data.enable_share;
           this.enableShare = true;
           break
         }
+        case "TERMINAL_SHARE": {
+          const data = JSON.parse(msg.data);
+          this.shareId = data.share_id;
+          this.shareCode = data.code;
+          this.loading = false
+          break
+        }
+        case "TERMINAL_SHARE_ONLINE": {
+          this.onlineShareInfo = JSON.parse(msg.data);
+          break
+        }
       }
       this.$log.debug("on ws data: ", msg)
-
     },
+
     handleChangeTheme(val) {
       if (this.$refs.term.term) {
         this.$refs.term.term.setOption("theme", val);
@@ -175,11 +189,12 @@ export default {
     },
     handleShareURlCreated() {
       this.loading = true
-      setTimeout(() => {
-        this.loading = false
-        this.shareId = '0000-00-00-0000'
-        this.shareCode = '1234'
-      }, 3000)
+      if (this.$refs.term) {
+        this.$refs.term.createShareInfo(this.sessionId, this.expiredTime);
+      }
+
+      this.$log.debug("分享请求数据： ", this.expiredTime, this.sessionId)
+
     },
     shareDialogClosed() {
       this.$log.debug("sharedialodClosed")
@@ -192,4 +207,7 @@ export default {
 </script>
 
 <style scoped>
+.el-menu-item.is-active {
+  color: #ffffff;
+}
 </style>

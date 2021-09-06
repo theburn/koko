@@ -7,6 +7,7 @@ type Message struct {
 	Type string `json:"type"`
 	Data string `json:"data"`
 	Raw  []byte `json:"-"`
+	Err  string `json:"err"`
 }
 
 const (
@@ -18,7 +19,12 @@ const (
 	TERMINALDATA   = "TERMINAL_DATA"
 	TERMINALRESIZE = "TERMINAL_RESIZE"
 	TERMINALBINARY = "TERMINAL_BINARY"
+
 	TERMINALSESSION = "TERMINAL_SESSION"
+
+	TERMINALSHARE       = "TERMINAL_SHARE"
+	TERMINALSHAREJOIN = "TERMINAL_SHARE_JOIN"
+	TERMINALSHARELEAVE = "TERMINAL_SHARE_LEAVE"
 )
 
 type WindowSize struct {
@@ -26,8 +32,26 @@ type WindowSize struct {
 	Rows int `json:"rows"`
 }
 
-type SessionData struct {
-	ID string `json:"id"`
+type TerminalConnectData struct {
+	Cols int    `json:"cols"`
+	Rows int    `json:"rows"`
+	Code string `json:"code"`
+}
+
+type ShareRequestParams struct {
+	SessionID  string `json:"session_id"`
+	ExpireTime int    `json:"expired"`
+}
+
+type ShareResponse struct {
+	ShareId string `json:"share_id"`
+	Code    string `json:"code"`
+}
+
+type ShareInfo struct {
+	ShareId   string
+	Code      string
+	SessionId string
 }
 
 const (

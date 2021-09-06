@@ -80,3 +80,7 @@ const (
 const (
 	CommandConfirmURL = "/api/v1/assets/cmd-filters/command-confirm/"
 )
+
+const (
+	ShareCreateURL = "/api/v1/terminal/session-sharings/"
+)

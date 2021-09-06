@@ -10,6 +10,7 @@ import (
 	"github.com/mediocregopher/radix/v3"
 	uuid "github.com/satori/go.uuid"
 
+	"github.com/jumpserver/koko/pkg/common"
 	"github.com/jumpserver/koko/pkg/logger"
 )
 
@@ -330,6 +331,7 @@ func (m *redisRoomManager) run() {
 					room := CreateRoom(req.RoomId, userInputChan)
 					m.remoteRoomCache.Add(room)
 					s := &redisChannel{
+						Id:           common.UUID(),
 						roomId:       req.RoomId,
 						writeChannel: writeChannel,
 						readChannel:  readChannel,
@@ -395,6 +397,7 @@ func (m *redisRoomManager) run() {
 						}
 
 						s := &redisChannel{
+							Id:           common.UUID(),
 							roomId:       req.RoomId,
 							writeChannel: writeChannel,
 							readChannel:  readChannel,

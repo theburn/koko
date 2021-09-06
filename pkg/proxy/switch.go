@@ -103,11 +103,9 @@ func (s *SwitchSession) Bridge(userConn UserConnection, srvConn srvconn.ServerCo
 		close(done)
 		_ = userConn.Close()
 		_ = srvConn.Close()
-		// 关闭parser
 		parser.Close()
 		// 关闭录像
 		replayRecorder.End()
-		//s.postBridge()
 	}()
 
 	// 记录命令
@@ -123,7 +121,7 @@ func (s *SwitchSession) Bridge(userConn UserConnection, srvConn srvconn.ServerCo
 	room := exchange.CreateRoom(s.ID, userInputMessageChan)
 	exchange.Register(room)
 	defer exchange.UnRegister(room)
-	conn := exchange.WrapperUserCon(userConn)
+	conn := exchange.WrapperUserCon(userConn.ID(), userConn)
 	room.Subscribe(conn)
 	defer room.UnSubscribe(conn)
 	exitSignal := make(chan struct{}, 2)

@@ -36,6 +36,7 @@ export default {
   name: "Terminal",
   props: {
     connectURL: String,
+    shareCode: String,
   },
   data() {
     return {
@@ -50,6 +51,7 @@ export default {
       zmodeDialogVisible: false,
       zmodeSession: null,
       fileList: [],
+      code: this.shareCode,
     }
   },
   mounted: function () {
@@ -208,10 +210,13 @@ export default {
         case 'CONNECT': {
           this.terminalId = msg.id;
           this.fitAddon.fit();
-          const cols = this.term.cols;
-          const rows = this.term.rows;
+          const data = {
+            cols:this.term.cols,
+            rows: this.term.rows,
+            code: this.code
+          }
           this.ws.send(this.message(this.terminalId, 'TERMINAL_INIT',
-              JSON.stringify({cols, rows})));
+              JSON.stringify(data)));
           break
         }
         case "CLOSE":
@@ -379,6 +384,10 @@ export default {
       }
       this.$refs.upload.clearFiles();
     },
+    createShareInfo(sid, val) {
+      this.sendWsMessage('TERMINAL_SHARE', {session_id:sid, expired:val,})
+    },
+
     sendWsMessage(type, data) {
       if (this.wsIsActivated()) {
         this.ws.send(this.message(this.terminalId, type,

@@ -2,12 +2,12 @@ package exchange
 
 import (
 	"container/ring"
+	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
 	"io"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/jumpserver/koko/pkg/common"
 	"github.com/jumpserver/koko/pkg/logger"
 )
 
@@ -174,17 +174,23 @@ func (r *Room) closeOnce() {
 	})
 }
 
-func WrapperUserCon(stream io.WriteCloser) *Conn {
+func WrapperUserCon(id string, stream Stream) *Conn {
 	return &Conn{
-		Id:          common.UUID(),
-		WriteCloser: stream,
-		created:     time.Now(),
+		Id:      id,
+		Stream:  stream,
+		created: time.Now(),
 	}
+}
+
+type Stream interface {
+	io.WriteCloser
+	HandleRoomEvent(event string, msg *RoomMessage)
+	GetUser() *model.User
 }
 
 type Conn struct {
 	Id string
-	io.WriteCloser
+	Stream
 	created time.Time
 }
 
@@ -194,6 +200,8 @@ func (c *Conn) handlerMessage(msg *RoomMessage) {
 		_, _ = c.Write(msg.Body)
 	case PingEvent:
 		_, _ = c.Write(nil)
+	default:
+		c.HandleRoomEvent(msg.Event, msg)
 	}
 }
 

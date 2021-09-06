@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"github.com/jumpserver/koko/pkg/exchange"
 	"io"
 	"net"
 	"sync"
@@ -140,4 +141,8 @@ func NewWrapperSession(sess ssh.Session) *WrapperSession {
 	}
 	w.initial()
 	return w
+}
+
+func (w *WrapperSession) HandleRoomEvent(event string, msg *exchange.RoomMessage) {
+
 }
