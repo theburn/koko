@@ -6,21 +6,19 @@ type RoomMessage struct {
 	Event string `json:"event"`
 	Body  []byte `json:"data"`
 
-	Meta MetaInfo `json:"meta"`
+	Meta MetaMessage `json:"meta"` // receive的信息必须携带Meta
 }
 
-type MetaInfo struct {
-	UserId   string `json:"user_id"`
-	Username string `json:"username"`
+type MetaMessage struct {
+	UserId     string `json:"user_id"`
+	User       string `json:"user"`
+	Created    string `json:"created"`
+	RemoteAddr string `json:"remote_addr"`
 }
 
 func (m RoomMessage) Marshal() []byte {
 	p, _ := json.Marshal(m)
 	return p
-}
-
-func (m RoomMessage) UnMarshal(p interface{}) {
-	_ = json.Unmarshal(m.Body, p)
 }
 
 const (
@@ -35,7 +33,7 @@ const (
 
 	JoinSuccessEvent = "JoinSuccess"
 
-	ShareTyping = "Share_TYPING"
 	ShareJoin   = "Share_JOIN"
 	ShareLeave  = "Share_LEAVE"
+	ShareUsers  = "Share_USERS"
 )

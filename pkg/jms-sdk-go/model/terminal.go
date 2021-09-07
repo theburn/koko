@@ -13,7 +13,7 @@ type TerminalConfig struct {
 	MaxIdleTime         int                    `json:"SECURITY_MAX_IDLE_TIME"`
 	HeartbeatDuration   int                    `json:"TERMINAL_HEARTBEAT_INTERVAL"`
 	HostKey             string                 `json:"TERMINAL_HOST_KEY"`
-	EnableShareRoom     bool                   `json:"ENABLE_SHARE_ROOM"`
+	EnableSessionShare  bool                   `json:"SECURITY_SESSION_SHARE"`
 }
 
 type Terminal struct {

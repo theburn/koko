@@ -341,6 +341,7 @@ export default {
         this.zmodeSession = null;
         this.fileList = [];
         this.term.write('\r\n')
+        this.$refs.upload.clearFiles();
       });
     },
 
@@ -383,6 +384,7 @@ export default {
         this.zmodeSession.abort();
       }
       this.$refs.upload.clearFiles();
+      this.$log.debug("删除dialog的文件")
     },
     createShareInfo(sid, val) {
       this.sendWsMessage('TERMINAL_SHARE', {session_id:sid, expired:val,})

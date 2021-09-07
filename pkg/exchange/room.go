@@ -2,12 +2,13 @@ package exchange
 
 import (
 	"container/ring"
-	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
+	"encoding/json"
 	"io"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/jumpserver/koko/pkg/common"
 	"github.com/jumpserver/koko/pkg/logger"
 )
 
@@ -61,6 +62,7 @@ func (r *Room) run() {
 	defer ticker.Stop()
 	defer r.closeOnce()
 	connMaps := make(map[string]*Conn)
+	currentOnlineUsers := make(map[string]MetaMessage)
 	for {
 		select {
 		case <-ticker.C:
@@ -85,6 +87,11 @@ func (r *Room) run() {
 					}
 				}
 			})
+			body, _ := json.Marshal(currentOnlineUsers)
+			con.handlerMessage(&RoomMessage{
+				Event: ShareUsers,
+				Body:  body,
+			})
 			logger.Debugf("Room %s current connections count: %d", r.Id, len(connMaps))
 		case con := <-r.unSubscriber:
 			delete(connMaps, con.Id)
@@ -98,6 +105,12 @@ func (r *Room) run() {
 			case DataEvent:
 				r.recentMessages.Value = msg
 				r.recentMessages = r.recentMessages.Next()
+			case ShareJoin:
+				key := msg.Meta.User + msg.Meta.Created
+				currentOnlineUsers[key] = msg.Meta
+			case ShareLeave:
+				key := msg.Meta.User + msg.Meta.Created
+				delete(currentOnlineUsers, key)
 			}
 			r.broadcastMessage(userConns, msg)
 
@@ -174,9 +187,9 @@ func (r *Room) closeOnce() {
 	})
 }
 
-func WrapperUserCon(id string, stream Stream) *Conn {
+func WrapperUserCon(stream Stream) *Conn {
 	return &Conn{
-		Id:      id,
+		Id:      common.UUID(),
 		Stream:  stream,
 		created: time.Now(),
 	}
@@ -185,7 +198,6 @@ func WrapperUserCon(id string, stream Stream) *Conn {
 type Stream interface {
 	io.WriteCloser
 	HandleRoomEvent(event string, msg *RoomMessage)
-	GetUser() *model.User
 }
 
 type Conn struct {

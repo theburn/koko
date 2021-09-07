@@ -1,6 +1,27 @@
 <template>
-  <el-container>
+  <el-container :style="backgroundColor">
+    <el-main>
     <Terminal v-if="!codeDialog" ref='term' v-bind:connectURL="wsURL" v-bind:shareCode="shareCode" v-on:ws-data="onWsData"></Terminal>
+    </el-main>
+       <el-aside width="60px" center>
+      <el-menu :collapse="true" :background-color="themeBackground" text-color="#ffffff">
+        <el-menu-item @click="dialogVisible=!dialogVisible" index="0">
+          <i class="el-icon-setting"></i>
+          <span slot="title">主题设置</span>
+        </el-menu-item>
+        <el-submenu index="2" v-if="displayOnlineUser">
+          <template slot="title">
+            <i class="el-icon-s-custom"></i>
+            <span slot="title">在线人员 </span>
+          </template>
+          <el-menu-item-group>
+            <span slot="title">人员 {{ onlineKeys.length }} </span>
+            <el-menu-item v-for="(item ,key) of onlineUsersMap" :key="key">{{ item.user }}</el-menu-item>
+          </el-menu-item-group>
+        </el-submenu>
+      </el-menu>
+    </el-aside>
+      <ThemeConfig :visible.sync="dialogVisible" @setTheme="handleChangeTheme"></ThemeConfig>
     <el-dialog
         title="提示"
         :visible.sync="codeDialog"
@@ -22,17 +43,23 @@
 
 <script>
 import Terminal from '@/components/Terminal'
+import ThemeConfig from "@/components/ThemeConfig";
 import {BASE_WS_URL} from "@/utils/common";
 
 export default {
   components: {
     Terminal,
+    ThemeConfig,
   },
   name: "ShareTerminal",
   data() {
     return {
+      dialogVisible: false,
+      themeBackground: "#1f1b1b",
       code: '',
       codeDialog: true,
+      onlineUsersMap:{},
+      onlineKeys:[],
     }
   },
   computed: {
@@ -41,6 +68,14 @@ export default {
     },
     shareCode() {
       return this.code
+    },
+    backgroundColor() {
+      return {
+        background: this.themeBackground
+      }
+    },
+    displayOnlineUser() {
+      return this.onlineKeys.length > 1;
     }
   },
   methods: {
@@ -53,10 +88,35 @@ export default {
     },
     onWsData(msgType, msg) {
       switch (msgType) {
-        case "TERMINAL_SHARE_ONLINE": {
-          this.onlineShareInfo = msg.data;
+        case "TERMINAL_SHARE_JOIN": {
+          const data = JSON.parse(msg.data);
+          const key = data.user_id+ data.created;
+          this.onlineUsersMap[key] = data;
+          this.$log.debug(this.onlineUsersMap);
+          this.updateOnlineCount();
           break
         }
+        case 'TERMINAL_SHARE_LEAVE': {
+          const data = JSON.parse(msg.data);
+          const key = data.user_id + data.created;
+          delete this.onlineUsersMap[key];
+          this.updateOnlineCount();
+          break
+        }
+        case 'TERMINAL_SHARE_USERS':{
+          const data = JSON.parse(msg.data);
+          this.onlineUsersMap = data;
+          this.updateOnlineCount();
+          this.$log.debug(data);
+          break
+        }
+        case 'TERMINAL_RESIZE':{
+          const data = JSON.parse(msg.data);
+          this.resize(data);
+          break
+        }
+        default:
+          break
       }
       this.$log.debug("on ws data: ", msg)
     },
@@ -67,6 +127,24 @@ export default {
       }
       this.$log.debug("code:", this.code)
       this.codeDialog = false
+    },
+    resize({Width, Height}) {
+      if (this.$refs.term){
+        this.$log.debug(Width, Height)
+        this.$refs.term.term.resize(Width, Height)
+      }
+    },
+    handleChangeTheme(val) {
+      if (this.$refs.term.term) {
+        this.$refs.term.term.setOption("theme", val);
+      }
+      this.$log.debug(val);
+      this.themeBackground = val.background;
+    },
+    updateOnlineCount(){
+          const keys = Object.keys(this.onlineUsersMap);
+          this.$log.debug(keys);
+          this.onlineKeys = keys;
     }
   },
 
@@ -74,5 +152,7 @@ export default {
 </script>
 
 <style scoped>
-
+.el-menu-item.is-active {
+  color: #ffffff;
+}
 </style>

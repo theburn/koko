@@ -131,7 +131,7 @@ func (h *InteractiveHandler) CheckShareRoomReadPerm(shareRoomID string) bool {
 
 func JoinRoom(h *InteractiveHandler, roomId string) {
 	if room := exchange.GetRoom(roomId); room != nil {
-		conn := exchange.WrapperUserCon(h.sess.ID(), h.sess)
+		conn := exchange.WrapperUserCon(h.sess)
 		room.Subscribe(conn)
 		defer room.UnSubscribe(conn)
 		for {

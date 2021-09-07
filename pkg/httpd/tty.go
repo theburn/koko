@@ -5,11 +5,11 @@ import (
 	"io"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gliderlabs/ssh"
 
 	"github.com/jumpserver/koko/pkg/exchange"
+	"github.com/jumpserver/koko/pkg/jms-sdk-go/common"
 	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
 	"github.com/jumpserver/koko/pkg/jms-sdk-go/service"
 	"github.com/jumpserver/koko/pkg/logger"
@@ -18,8 +18,6 @@ import (
 )
 
 var _ Handler = (*tty)(nil)
-
-var cache = map[string]string{}
 
 type tty struct {
 	ws *UserWebsocket
@@ -59,7 +57,7 @@ func (h *tty) CheckValidation() bool {
 	case TargetTypeMonitor:
 		ok = h.CheckShareRoomReadPerm(h.ws.user.ID, h.targetId)
 	case TargetTypeShare:
-		ok = h.CheckShareRoomWritePerm(h.ws.user.ID, h.targetId)
+		ok = h.CheckEnableShare()
 	default:
 		if h.systemUserId == "" || h.targetId == "" {
 			logger.Errorf("Ws[%s] miss required query params.", h.ws.Uuid)
@@ -105,8 +103,9 @@ func (h *tty) HandleMessage(msg *Message) {
 			code := connectInfo.Code
 			info, err2 := h.ValidateShareParams(h.targetId, code)
 			if err2 != nil {
-				logger.Errorf("Ws[%s] terminal initial message data unmarshal err: %s",
-					h.ws.Uuid, err)
+				logger.Errorf("Ws[%s] terminal initial validate share err: %s",
+					h.ws.Uuid, err2)
+
 				return
 			}
 			h.shareInfo = &info
@@ -176,21 +175,7 @@ func (h *tty) handleTerminalMessage(msg *Message) {
 			return
 		}
 		logger.Debugf("Ws[%s] receive share request %s", h.ws.Uuid, msg.Data)
-		go func() {
-			// 创建 共享连接
-			res, err2 := h.handleShareRequest(shareData)
-			if err2 != nil {
-				logger.Errorf("Ws[%s] handle share request err: %s", h.ws.Uuid, err)
-				return
-			}
-			logger.Infof("Ws[%s] handle share request %+v", h.ws.Uuid, res)
-			data, _ := json.Marshal(res)
-			h.ws.SendMessage(&Message{
-				Id:   h.ws.Uuid,
-				Type: TERMINALSHARE,
-				Data: string(data),
-			})
-		}()
+		go h.createShareSession(shareData)
 		return
 
 	case CLOSE:
@@ -201,35 +186,45 @@ func (h *tty) handleTerminalMessage(msg *Message) {
 	}
 }
 
-func (h *tty) handleShareRequest(data ShareRequestParams) (res ShareResponse, err error) {
-	// todo 发请求，获取地址和校验码
-	//time.Sleep(5 * time.Second)
-	//res.ShareId = common.UUID()
-	//res.Code = "12345"
-	//id := res.ShareId + res.Code
-	//cache[id] = data.SessionID
+func (h *tty) createShareSession(shareData ShareRequestParams) {
+	// 创建 共享连接
+	res, err := h.handleShareRequest(shareData)
+	if err != nil {
+		logger.Errorf("Ws[%s] handle share request err: %s", h.ws.Uuid, err)
+	}
+	data, _ := json.Marshal(res)
+	h.ws.SendMessage(&Message{
+		Id:   h.ws.Uuid,
+		Type: TERMINALSHARE,
+		Data: string(data),
+	})
+}
 
-	res2, err := h.jmsService.CreateShare(data.SessionID, data.ExpireTime)
+func (h *tty) handleShareRequest(data ShareRequestParams) (res ShareResponse, err error) {
+	shareResp, err := h.jmsService.CreateShareRoom(data.SessionID, data.ExpireTime)
 	if err != nil {
 		logger.Error(err)
 		return res, err
 	}
-	res.ShareId = res2.ID
-	res.Code = res2.Code
+	res.ShareId = shareResp.ID
+	res.Code = shareResp.Code
 	return
 }
 
 func (h *tty) ValidateShareParams(shareId, code string) (info ShareInfo, err error) {
-	// todo 校验 shareId 和 code
-	time.Sleep(2 * time.Second)
-	id := shareId + code
-	sid := cache[id]
-	return ShareInfo{
-		ShareId:   shareId,
-		Code:      code,
-		SessionId: sid,
-	}, nil
+	data := service.SharePostData{
+		ShareId:    shareId,
+		Code:       code,
+		UserId:     h.ws.user.ID,
+		RemoteAddr: h.ws.ClientIP(),
+	}
 
+	recordRes, err := h.jmsService.JoinShareRoom(data)
+	if err != nil {
+		logger.Errorf("Conn[%s] Validate Share err: %s", h.ws.Uuid, err)
+		return
+	}
+	return ShareInfo{recordRes}, nil
 }
 
 func (h *tty) getTargetApp(protocol string) bool {
@@ -274,7 +269,7 @@ func (h *tty) proxy(wg *sync.WaitGroup) {
 	case TargetTypeMonitor:
 		h.Monitor(h.backendClient, h.targetId)
 	case TargetTypeShare:
-		roomID := h.shareInfo.SessionId
+		roomID := h.shareInfo.Record.SessionId
 		h.JoinRoom(h.backendClient, roomID)
 	default:
 		proxyOpts := make([]proxy.ConnectionOption, 0, 4)
@@ -316,37 +311,77 @@ func (h *tty) CheckShareRoomReadPerm(uerId, roomId string) bool {
 	return true
 }
 
-func (h *tty) CheckShareRoomWritePerm(uid, roomId string) bool {
-	// todo: 检查是否有权限操作
-	return h.shareInfo != nil
+func (h *tty) CheckEnableShare() bool {
+	termConf, err := h.jmsService.GetTerminalConfig()
+	if err != nil {
+		logger.Error(err)
+	}
+	return termConf.EnableSessionShare
 }
 
+/*
+	1. ask join room id (session id)
+	2. room receive msg send to client
+	3. client emit msg to room
+*/
+
 func (h *tty) JoinRoom(c *Client, roomID string) {
-	/*
-		1. ask join room id (session id)
-		2. room receive msg send to client
-		3. client emit msg to room
-	*/
+
+	user := h.ws.user
+	meta := exchange.MetaMessage{
+		UserId:     user.ID,
+		User:       user.String(),
+		Created:    common.NewNowUTCTime().String(),
+		RemoteAddr: c.RemoteAddr(),
+	}
 	if room := exchange.GetRoom(roomID); room != nil {
-		conn := exchange.WrapperUserCon(c.ID(), c)
+		conn := exchange.WrapperUserCon(c)
 		room.Subscribe(conn)
 		defer room.UnSubscribe(conn)
+		room.Broadcast(&exchange.RoomMessage{
+			Event: exchange.ShareJoin,
+			Body:  nil,
+			Meta:  meta,
+		})
 		for {
 			buf := make([]byte, 1024)
 			nr, err := c.Read(buf)
-			if nr > 0 && h.CheckShareRoomWritePerm(c.Conn.user.ID, roomID) {
+			if nr > 0 {
 				room.Receive(&exchange.RoomMessage{
-					Event: exchange.DataEvent, Body: buf[:nr]})
+					Event: exchange.DataEvent, Body: buf[:nr],
+					Meta: meta})
 			}
 			if err != nil {
 				logger.Error(err)
 				break
 			}
 		}
+		room.Broadcast(&exchange.RoomMessage{
+			Event: exchange.ShareLeave,
+			Body:  nil,
+			Meta:  meta,
+		})
 		logger.Infof("Conn[%s] user read end", c.ID())
+		if err := h.jmsService.FinishShareRoom(h.shareInfo.Record.ID); err != nil {
+			logger.Infof("Conn[%s] finish share room err: %s", c.ID(), err)
+		}
 	}
 }
 
 func (h *tty) Monitor(c *Client, roomID string) {
-	h.JoinRoom(c, roomID)
+	if room := exchange.GetRoom(roomID); room != nil {
+		conn := exchange.WrapperUserCon(c)
+		room.Subscribe(conn)
+		defer room.UnSubscribe(conn)
+		for {
+			buf := make([]byte, 1024)
+			_, err := c.Read(buf)
+			if err != nil {
+				logger.Error(err)
+				break
+			}
+			logger.Debugf("Conn[%s] user monitor", c.ID())
+		}
+		logger.Infof("Conn[%s] user read end", c.ID())
+	}
 }

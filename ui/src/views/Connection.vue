@@ -13,15 +13,14 @@
           <i class="el-icon-share"></i>
           <span slot="title">分享</span>
         </el-menu-item>
-        <el-submenu index="2">
+        <el-submenu index="2" v-if="displayOnlineUser">
           <template slot="title">
             <i class="el-icon-s-custom"></i>
             <span slot="title">在线人员</span>
           </template>
           <el-menu-item-group>
-            <span slot="title">人员</span>
-            <el-menu-item index="2-1">选项1</el-menu-item>
-            <el-menu-item index="2-2">选项2</el-menu-item>
+            <span slot="title">人员 {{ onlineKeys.length }}</span>
+            <el-menu-item v-for="(item ,key) of onlineUsersMap" :key="key">{{ item.user }}</el-menu-item>
           </el-menu-item-group>
         </el-submenu>
 
@@ -96,9 +95,9 @@ export default {
       shareId: null,
       loading: false,
       shareCode: null,
-      shareCode2: '#ffffff',
       shareInfo: null,
-      onlineShareInfo: null,
+      onlineUsersMap:{},
+      onlineKeys:[],
     }
   },
   computed: {
@@ -115,6 +114,9 @@ export default {
     },
     shareURL() {
       return this.shareId ? this.generateShareURL() : '无地址'
+    },
+    displayOnlineUser() {
+      return this.onlineKeys.length > 1;
     }
   },
   methods: {
@@ -162,7 +164,6 @@ export default {
           const data = JSON.parse(msg.data);
           this.sessionId = data.id;
           this.enableShare = data.enable_share;
-          this.enableShare = true;
           break
         }
         case "TERMINAL_SHARE": {
@@ -172,10 +173,23 @@ export default {
           this.loading = false
           break
         }
-        case "TERMINAL_SHARE_ONLINE": {
-          this.onlineShareInfo = JSON.parse(msg.data);
+        case "TERMINAL_SHARE_JOIN": {
+          const data = JSON.parse(msg.data);
+          const key = data.user_id + data.created;
+          this.onlineUsersMap[key] = data;
+          this.$log.debug(this.onlineUsersMap);
+          this.updateOnlineCount();
           break
         }
+        case 'TERMINAL_SHARE_LEAVE': {
+          const data = JSON.parse(msg.data);
+          const key = data.user_id + data.created;
+          delete this.onlineUsersMap[key];
+          this.updateOnlineCount();
+          break
+        }
+        default:
+          break
       }
       this.$log.debug("on ws data: ", msg)
     },
@@ -192,15 +206,19 @@ export default {
       if (this.$refs.term) {
         this.$refs.term.createShareInfo(this.sessionId, this.expiredTime);
       }
-
       this.$log.debug("分享请求数据： ", this.expiredTime, this.sessionId)
 
     },
     shareDialogClosed() {
-      this.$log.debug("sharedialodClosed")
+      this.$log.debug("share dialog closed")
       this.loading = false;
       this.shareId = null;
       this.shareCode = null;
+    },
+    updateOnlineCount(){
+      const keys = Object.keys(this.onlineUsersMap);
+      this.$log.debug(keys);
+      this.onlineKeys = keys;
     }
   },
 }

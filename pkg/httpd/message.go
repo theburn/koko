@@ -1,6 +1,10 @@
 package httpd
 
-import "time"
+import (
+	"time"
+
+	"github.com/jumpserver/koko/pkg/jms-sdk-go/model"
+)
 
 type Message struct {
 	Id   string `json:"id"`
@@ -23,8 +27,9 @@ const (
 	TERMINALSESSION = "TERMINAL_SESSION"
 
 	TERMINALSHARE       = "TERMINAL_SHARE"
-	TERMINALSHAREJOIN = "TERMINAL_SHARE_JOIN"
-	TERMINALSHARELEAVE = "TERMINAL_SHARE_LEAVE"
+	TERMINALSHAREJOIN   = "TERMINAL_SHARE_JOIN"
+	TERMINALSHARELEAVE  = "TERMINAL_SHARE_LEAVE"
+	TERMINALSHAREUSERS = "TERMINAL_SHARE_USERS"
 )
 
 type WindowSize struct {
@@ -49,9 +54,7 @@ type ShareResponse struct {
 }
 
 type ShareInfo struct {
-	ShareId   string
-	Code      string
-	SessionId string
+	Record model.ShareRecord
 }
 
 const (

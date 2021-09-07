@@ -62,7 +62,7 @@ func proxyUserCon(room *Room, ch *redisChannel) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	currentNumber := 1
-	con := WrapperUserCon("",ch)
+	con := WrapperUserCon(ch)
 	room.Subscribe(con)
 	defer func() {
 		room.UnSubscribe(con)

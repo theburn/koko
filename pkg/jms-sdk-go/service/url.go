@@ -82,5 +82,7 @@ const (
 )
 
 const (
-	ShareCreateURL = "/api/v1/terminal/session-sharings/"
+	ShareCreateURL        = "/api/v1/terminal/session-sharings/"
+	ShareSessionJoinURL   = "/api/v1/terminal/session-join-records/"
+	ShareSessionFinishURL = "/api/v1/terminal/session-join-records/%s/finished/"
 )
