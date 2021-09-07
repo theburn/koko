@@ -90,7 +90,6 @@ func proxyUserCon(room *Room, ch *redisChannel) {
 			}
 			var msg RoomMessage
 			_ = json.Unmarshal(redisMsg.Message, &msg)
-			//  todo: 代理所有的用户的信息 信息中携带用户信息
 			room.Receive(&msg)
 		}
 	}

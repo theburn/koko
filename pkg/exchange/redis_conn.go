@@ -12,8 +12,6 @@ import (
 var _ io.WriteCloser = (*redisChannel)(nil)
 
 type redisChannel struct {
-	Id string
-
 	roomId string
 
 	writeChannel string

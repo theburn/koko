@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"github.com/jumpserver/koko/pkg/exchange"
 	"io"
 	"net"
 	"sync"
@@ -10,6 +9,7 @@ import (
 	"github.com/gliderlabs/ssh"
 
 	"github.com/jumpserver/koko/pkg/common"
+	"github.com/jumpserver/koko/pkg/exchange"
 	"github.com/jumpserver/koko/pkg/logger"
 )
 
@@ -86,10 +86,6 @@ func (w *WrapperSession) initReadPip() {
 	w.mux.Lock()
 	defer w.mux.Unlock()
 	w.outReader, w.inWriter = io.Pipe()
-}
-
-func (w *WrapperSession) Protocol() string {
-	return "ssh"
 }
 
 func (w *WrapperSession) Context() context.Context {
