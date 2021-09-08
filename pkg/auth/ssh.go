@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -54,8 +55,7 @@ func SSHPasswordAndPublicKeyAuth(jmsService *service.JMService) SSHAuthFunc {
 			res = sshd.AuthSuccessful
 			ctx.SetValue(ContextKeyUser, &user)
 		case authConfirmRequired:
-			required := true
-			ctx.SetValue(ContextKeyConfirmRequired, &required)
+			userAuthClient.SetNextStage(StageConfirm)
 			action = actionPartialAccepted
 			res = sshd.AuthPartiallySuccessful
 		default:
@@ -69,7 +69,7 @@ func SSHPasswordAndPublicKeyAuth(jmsService *service.JMService) SSHAuthFunc {
 }
 
 func SSHKeyboardInteractiveAuth(ctx ssh.Context, challenger gossh.KeyboardInteractiveChallenge) (res sshd.AuthStatus) {
-	if value, ok := ctx.Value(ContextKeyConfirmFailed).(*bool); ok && *value {
+	if value, ok := ctx.Value(ContextKeyAuthFailed).(*bool); ok && *value {
 		return sshd.AuthFailed
 	}
 	username := GetUsernameFromSSHCtx(ctx)
@@ -83,19 +83,22 @@ func SSHKeyboardInteractiveAuth(ctx ssh.Context, challenger gossh.KeyboardIntera
 		return
 	}
 	opts := client.GetMFAOptions()
-	if len(opts) == 1 {
-		if ok2 := client.SetAuthMFAType(opts[0]); !ok2 {
-			logger.Errorf("SSH conn[%s] user %s select mfa choice failed",
-				ctx.SessionID(), username)
+	currentStage := client.CurrentStage()
+	if len(opts) == 1 && currentStage == StageMFASelect {
+		// 仅有一个 option, 直接跳过选择界面
+		if err2 := client.SetAuthMFAType(opts[0]); err2 != nil {
+			logger.Errorf("SSH conn[%s] user %s select mfa choice failed: %s",
+				ctx.SessionID(), username, err2)
 			return
 		}
 		client.SetNextStage(StageMFACode)
+		currentStage = StageMFACode
 	}
-	instruction, question := CreateChallengerInstruction(opts)
-	currentStage := client.CurrentStage()
-	var authFunc func(string) sshd.AuthStatus
-	var answers []string
-	var err error
+	var (
+		authFunc func(string) sshd.AuthStatus
+		answers  []string
+		err      error
+	)
 	switch currentStage {
 	case StageConfirm:
 		answers, err = challenger(username, confirmInstruction, []string{confirmQuestion}, []bool{true})
@@ -124,12 +127,13 @@ func SSHKeyboardInteractiveAuth(ctx ssh.Context, challenger gossh.KeyboardIntera
 				return
 			}
 			failed := true
-			ctx.SetValue(ContextKeyConfirmFailed, &failed)
+			ctx.SetValue(ContextKeyAuthFailed, &failed)
 			logger.Infof("SSH conn[%s] checking user %s login confirm failed", ctx.SessionID(), username)
 			return
 		}
 	case StageMFASelect:
-		answers, err = challenger(username, instruction, []string{question}, []bool{true})
+		question := CreateSelectOptionsQuestion(opts)
+		answers, err = challenger(username, mfaSelectInstruction, []string{question}, []bool{true})
 		if err != nil {
 			logger.Errorf("SSH conn[%s] user %s happened err: %s", ctx.SessionID(), username, err)
 			return
@@ -147,7 +151,7 @@ func SSHKeyboardInteractiveAuth(ctx ssh.Context, challenger gossh.KeyboardIntera
 				return
 			}
 			optType := opts[optIndex]
-			if ok = client.SetAuthMFAType(optType); !ok {
+			if err2 = client.SetAuthMFAType(optType); err2 != nil {
 				logger.Errorf("SSH conn[%s] select MFA choice %s failed", ctx.SessionID(), optType)
 				return
 			}
@@ -156,7 +160,10 @@ func SSHKeyboardInteractiveAuth(ctx ssh.Context, challenger gossh.KeyboardIntera
 			return
 		}
 	case StageMFACode:
-		answers, err = challenger(username, instruction, []string{question}, []bool{true})
+		optType := client.GetSelectedMFAType()
+		question := fmt.Sprintf(mfaOptionQuestion, strings.ToUpper(optType))
+
+		answers, err = challenger(username, mfaOptionInstruction, []string{question}, []bool{true})
 		if err != nil {
 			logger.Errorf("SSH conn[%s] user %s happened err: %s", ctx.SessionID(), username, err)
 			return
@@ -172,8 +179,7 @@ func SSHKeyboardInteractiveAuth(ctx ssh.Context, challenger gossh.KeyboardIntera
 					actionAccepted, username, remoteAddr)
 			case authConfirmRequired:
 				res = sshd.AuthPartiallySuccessful
-				required := true
-				ctx.SetValue(ContextKeyConfirmRequired, &required)
+				client.SetNextStage(StageConfirm)
 				logger.Infof("SSH conn[%s] %s MFA for %s from %s", ctx.SessionID(),
 					actionPartialAccepted, username, remoteAddr)
 			default:
@@ -193,10 +199,10 @@ func SSHKeyboardInteractiveAuth(ctx ssh.Context, challenger gossh.KeyboardIntera
 }
 
 const (
-	ContextKeyUser            = "CONTEXT_USER"
-	ContextKeyClient          = "CONTEXT_CLIENT"
-	ContextKeyConfirmRequired = "CONTEXT_CONFIRM_REQUIRED"
-	ContextKeyConfirmFailed   = "CONTEXT_CONFIRM_FAILED"
+	ContextKeyUser   = "CONTEXT_USER"
+	ContextKeyClient = "CONTEXT_CLIENT"
+
+	ContextKeyAuthFailed = "CONTEXT_AUTH_FAILED"
 
 	ContextKeyDirectLoginFormat = "CONTEXT_DIRECT_LOGIN_FORMAT"
 )

@@ -22,7 +22,7 @@ type UserAuthClient struct {
 	mfaTypes    []string
 	stageStatus Stage
 
-	selectMfaType string
+	selectedMFAType string
 }
 
 func (u *UserAuthClient) SetOption(setters ...service.UserClientOption) {
@@ -65,44 +65,11 @@ func (u *UserAuthClient) Authenticate(ctx context.Context) (user model.User, aut
 	return
 }
 
-//func (u *UserAuthClient) CheckUserOTP(ctx context.Context, code string) (user model.User, authStatus StatusAuth) {
-//	authStatus = authFailed
-//	data := map[string]interface{}{
-//		"code":        code,
-//		"remote_addr": u.Opts.RemoteAddr,
-//		"login_type":  u.Opts.LoginType,
-//	}
-//	for name, authData := range u.authOptions {
-//		switch name {
-//		case "opt":
-//			data["type"] = name
-//		}
-//		resp, err := u.UserClient.SendOTPRequest(&service.OTPRequest{
-//			ReqURL:  authData.Url,
-//			ReqBody: data,
-//		})
-//		if err != nil {
-//			logger.Errorf("User %s use %s check MFA err: %s", u.Opts.Username, name, err)
-//			continue
-//		}
-//		if resp.Err != "" {
-//			logger.Errorf("User %s use %s check MFA err: %s", u.Opts.Username, name, resp.Err)
-//			continue
-//		}
-//		if resp.Msg == "ok" {
-//			logger.Infof("User %s check MFA success, check if need admin confirm", u.Opts.Username)
-//			return u.Authenticate(ctx)
-//		}
-//	}
-//	logger.Errorf("User %s failed to check MFA", u.Opts.Username)
-//	return
-//}
-
 func (u *UserAuthClient) CheckUserOTP(ctx context.Context, code string) (user model.User, authStatus StatusAuth) {
 	authStatus = authFailed
-	authData, ok := u.authOptions[u.selectMfaType]
+	authData, ok := u.authOptions[u.selectedMFAType]
 	if !ok {
-		logger.Errorf("User %s use %s check MFA not found", u.Opts.Username, u.selectMfaType)
+		logger.Errorf("User %s use %s check MFA not found", u.Opts.Username, u.selectedMFAType)
 		return
 	}
 	data := map[string]interface{}{
@@ -136,14 +103,10 @@ func (u *UserAuthClient) GetMFAOptions() []string {
 	return u.mfaTypes
 }
 
-func (u *UserAuthClient) SetAuthMFAType(mfaType string) bool {
+func (u *UserAuthClient) SetAuthMFAType(mfaType string) error {
 	logger.Infof("User select mfa type %s", mfaType)
-	if err := u.UserClient.SelectMFAChoice(mfaType); err != nil {
-		logger.Errorf("User select mfa type %s failed: %s", mfaType, err)
-		return false
-	}
-	u.selectMfaType = mfaType
-	return true
+	u.selectedMFAType = mfaType
+	return u.UserClient.SelectMFAChoice(mfaType)
 }
 
 func (u *UserAuthClient) SetNextStage(next Stage) {
@@ -152,6 +115,10 @@ func (u *UserAuthClient) SetNextStage(next Stage) {
 
 func (u *UserAuthClient) CurrentStage() Stage {
 	return u.stageStatus
+}
+
+func (u *UserAuthClient) GetSelectedMFAType() string {
+	return u.selectedMFAType
 }
 
 const (

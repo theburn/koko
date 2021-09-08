@@ -1,13 +1,14 @@
 package auth
 
 import (
-	"fmt"
 	"strings"
 	"text/template"
 )
 
-var confirmInstruction = "Please wait for your admin to confirm."
-var confirmQuestion = "Do you want to continue [Y/n]? : "
+var (
+	confirmInstruction = "Please wait for your admin to confirm."
+	confirmQuestion    = "Do you want to continue [Y/n]? : "
+)
 
 const (
 	actionAccepted        = "Accepted"
@@ -15,26 +16,22 @@ const (
 	actionPartialAccepted = "Partial accepted"
 )
 
-func CreateChallengerInstruction(options []string) (string, string) {
-	if len(options) == 1 {
-		opt := options[0]
-		return mfaOptionInstruction, fmt.Sprintf(mfaOptionQuestion, opt)
-	}
+func CreateSelectOptionsQuestion(options []string) string{
 	opts := make([]mfaOption, 0, len(options))
 	for i := range options {
 		opts = append(opts, mfaOption{
 			Index: i + 1,
-			Value: options[i],
+			Value: strings.ToUpper(options[i]),
 		})
 	}
 	var out strings.Builder
 	_ = mfaSelectTmpl.Execute(&out, opts)
-	return mfaSelectInstruction, out.String()
+	return out.String()
 }
 
 var (
 	mfaSelectTmpl        = template.Must(template.New("mfaOptions").Parse(mfaOptions))
-	mfaSelectInstruction = "please select MFA choice"
+	mfaSelectInstruction = "Please Select MFA Option"
 )
 
 type mfaOption struct {
@@ -42,10 +39,10 @@ type mfaOption struct {
 	Value string
 }
 
-var mfaOptions = `{{ range . }}{{ .Index }}: {{.Value}}
-{{end}} num>: `
+var mfaOptions = `{{ range . }}{{ .Index }}. {{.Value}}
+{{end}}Option> `
 
 var (
-	mfaOptionInstruction = "Please enter MFA code."
-	mfaOptionQuestion    = "[%s auth]: "
+	mfaOptionInstruction = "Please Enter MFA Code."
+	mfaOptionQuestion    = "[%s Code]: "
 )
