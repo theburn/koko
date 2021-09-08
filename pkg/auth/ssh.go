@@ -2,6 +2,7 @@ package auth
 
 import (
 	"net"
+	"strconv"
 	"strings"
 
 	"github.com/gliderlabs/ssh"
@@ -75,73 +76,120 @@ func SSHKeyboardInteractiveAuth(ctx ssh.Context, challenger gossh.KeyboardIntera
 	remoteAddr, _, _ := net.SplitHostPort(ctx.RemoteAddr().String())
 	res = sshd.AuthFailed
 
-	var confirmAction bool
-	instruction := mfaInstruction
-	question := mfaQuestion
-
 	client, ok := ctx.Value(ContextKeyClient).(*UserAuthClient)
 	if !ok {
 		logger.Errorf("SSH conn[%s] user %s Mfa Auth failed: not found session client.",
 			ctx.SessionID(), username)
 		return
 	}
-	value, ok := ctx.Value(ContextKeyConfirmRequired).(*bool)
-	if ok && *value {
-		confirmAction = true
-		instruction = confirmInstruction
-		question = confirmQuestion
-	}
-	answers, err := challenger(username, instruction, []string{question}, []bool{true})
-	if err != nil || len(answers) != 1 {
-		if confirmAction {
-			client.CancelConfirm()
+	opts := client.GetMFAOptions()
+	if len(opts) == 1 {
+		if ok2 := client.SetAuthMFAType(opts[0]); !ok2 {
+			logger.Errorf("SSH conn[%s] user %s select mfa choice failed",
+				ctx.SessionID(), username)
+			return
 		}
-		logger.Errorf("SSH conn[%s] user %s happened err: %s", ctx.SessionID(), username, err)
-		return
+		client.SetNextStage(StageMFACode)
 	}
-	if confirmAction {
-		switch strings.TrimSpace(strings.ToLower(answers[0])) {
-		case "yes", "y", "":
-			logger.Infof("SSH conn[%s] checking user %s login confirm", ctx.SessionID(), username)
-			user, authStatus := client.CheckConfirm(ctx)
+	instruction, question := CreateChallengerInstruction(opts)
+	currentStage := client.CurrentStage()
+	var authFunc func(string) sshd.AuthStatus
+	var answers []string
+	var err error
+	switch currentStage {
+	case StageConfirm:
+		answers, err = challenger(username, confirmInstruction, []string{confirmQuestion}, []bool{true})
+		if err != nil {
+			client.CancelConfirm()
+			logger.Errorf("SSH conn[%s] user %s happened err: %s", ctx.SessionID(), username, err)
+			return
+		}
+		authFunc = func(answer string) (res sshd.AuthStatus) {
+			res = sshd.AuthFailed
+			switch strings.TrimSpace(strings.ToLower(answer)) {
+			case "yes", "y", "":
+				logger.Infof("SSH conn[%s] checking user %s login confirm", ctx.SessionID(), username)
+				user, authStatus := client.CheckConfirm(ctx)
+				switch authStatus {
+				case authSuccess:
+					res = sshd.AuthSuccessful
+					ctx.SetValue(ContextKeyUser, &user)
+					logger.Infof("SSH conn[%s] checking user %s login confirm success", ctx.SessionID(), username)
+					return
+				}
+			case "no", "n":
+				logger.Infof("SSH conn[%s] user %s cancel login", ctx.SessionID(), username)
+				client.CancelConfirm()
+			default:
+				return
+			}
+			failed := true
+			ctx.SetValue(ContextKeyConfirmFailed, &failed)
+			logger.Infof("SSH conn[%s] checking user %s login confirm failed", ctx.SessionID(), username)
+			return
+		}
+	case StageMFASelect:
+		answers, err = challenger(username, instruction, []string{question}, []bool{true})
+		if err != nil {
+			logger.Errorf("SSH conn[%s] user %s happened err: %s", ctx.SessionID(), username, err)
+			return
+		}
+		authFunc = func(answer string) (res sshd.AuthStatus) {
+			res = sshd.AuthFailed
+			index, err2 := strconv.Atoi(answer)
+			if err2 != nil {
+				logger.Errorf("SSH conn[%s] user %s input wrong answer: %s", ctx.SessionID(), username, err2)
+				return
+			}
+			optIndex := index - 1
+			if optIndex < 0 || optIndex >= len(opts) {
+				logger.Errorf("SSH conn[%s] user %s input wrong index: %d", ctx.SessionID(), username, index)
+				return
+			}
+			optType := opts[optIndex]
+			if ok = client.SetAuthMFAType(optType); !ok {
+				logger.Errorf("SSH conn[%s] select MFA choice %s failed", ctx.SessionID(), optType)
+				return
+			}
+			res = sshd.AuthPartiallySuccessful
+			client.SetNextStage(StageMFACode)
+			return
+		}
+	case StageMFACode:
+		answers, err = challenger(username, instruction, []string{question}, []bool{true})
+		if err != nil {
+			logger.Errorf("SSH conn[%s] user %s happened err: %s", ctx.SessionID(), username, err)
+			return
+		}
+		authFunc = func(answer string) (res sshd.AuthStatus) {
+			res = sshd.AuthFailed
+			user, authStatus := client.CheckUserOTP(ctx, answer)
 			switch authStatus {
 			case authSuccess:
 				res = sshd.AuthSuccessful
 				ctx.SetValue(ContextKeyUser, &user)
-				logger.Infof("SSH conn[%s] checking user %s login confirm success", ctx.SessionID(), username)
-				return
+				logger.Infof("SSH conn[%s] %s MFA for %s from %s", ctx.SessionID(),
+					actionAccepted, username, remoteAddr)
+			case authConfirmRequired:
+				res = sshd.AuthPartiallySuccessful
+				required := true
+				ctx.SetValue(ContextKeyConfirmRequired, &required)
+				logger.Infof("SSH conn[%s] %s MFA for %s from %s", ctx.SessionID(),
+					actionPartialAccepted, username, remoteAddr)
+			default:
+				logger.Errorf("SSH conn[%s] %s MFA for %s from %s", ctx.SessionID(),
+					actionFailed, username, remoteAddr)
 			}
-		case "no", "n":
-			logger.Infof("SSH conn[%s] user %s cancel login", ctx.SessionID(), username)
-			client.CancelConfirm()
-		default:
 			return
 		}
-		failed := true
-		ctx.SetValue(ContextKeyConfirmFailed, &failed)
-		logger.Infof("SSH conn[%s] checking user %s login confirm failed", ctx.SessionID(), username)
+		logger.Infof("SSH conn[%s] checking user %s mfa code", ctx.SessionID(), username)
+	default:
 		return
 	}
-	mfaCode := answers[0]
-	logger.Infof("SSH conn[%s] checking user %s mfa code", ctx.SessionID(), username)
-	user, authStatus := client.CheckUserOTP(ctx, mfaCode)
-	switch authStatus {
-	case authSuccess:
-		res = sshd.AuthSuccessful
-		ctx.SetValue(ContextKeyUser, &user)
-		logger.Infof("SSH conn[%s] %s MFA for %s from %s", ctx.SessionID(),
-			actionAccepted, username, remoteAddr)
-	case authConfirmRequired:
-		res = sshd.AuthPartiallySuccessful
-		required := true
-		ctx.SetValue(ContextKeyConfirmRequired, &required)
-		logger.Infof("SSH conn[%s] %s MFA for %s from %s", ctx.SessionID(),
-			actionPartialAccepted, username, remoteAddr)
-	default:
-		logger.Errorf("SSH conn[%s] %s MFA for %s from %s", ctx.SessionID(),
-			actionFailed, username, remoteAddr)
+	if len(answers) != 1 {
+		return
 	}
-	return
+	return authFunc(answers[0])
 }
 
 const (
