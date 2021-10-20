@@ -617,6 +617,7 @@ func (s *Server) checkReuseSSHClient() bool {
 }
 
 func (s *Server) getCacheSSHConn() (srvConn *srvconn.SSHConnection, ok bool) {
+	return nil, false
 	keyId := srvconn.MakeReuseSSHClientKey(s.connOpts.user.ID, s.connOpts.asset.ID,
 		s.connOpts.systemUser.ID, s.systemUserAuthInfo.Username)
 	sshClient, ok := srvconn.GetClientFromCache(keyId)
