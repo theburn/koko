@@ -473,7 +473,7 @@ func (s *Server) GetCommandRecorder() *CommandRecorder {
 }
 
 func (s *Server) GenerateCommandItem(user, input, output string,
-	riskLevel int64, createdDate time.Time,) *model.Command {
+	riskLevel int64, createdDate time.Time) *model.Command {
 	switch s.connOpts.ProtocolType {
 	case srvconn.ProtocolTELNET, srvconn.ProtocolSSH:
 		return &model.Command{
@@ -617,6 +617,7 @@ func (s *Server) checkReuseSSHClient() bool {
 }
 
 func (s *Server) getCacheSSHConn() (srvConn *srvconn.SSHConnection, ok bool) {
+	return nil, false
 	keyId := srvconn.MakeReuseSSHClientKey(s.connOpts.user.ID, s.connOpts.asset.ID,
 		s.connOpts.systemUser.ID, s.systemUserAuthInfo.Username)
 	sshClient, ok := srvconn.GetClientFromCache(keyId)
@@ -753,7 +754,8 @@ func (s *Server) getSSHConn() (srvConn *srvconn.SSHConnection, err error) {
 		ans := make([]string, len(questions))
 		for i := range questions {
 			q := questions[i]
-			termReader.SetPrompt(questions[i])
+			fixQ := strings.ReplaceAll(questions[i], "\n", "\r\n")
+			termReader.SetRawPrompt(fixQ)
 			logger.Debugf("Conn[%s] keyboard auth question [ %s ]", s.UserConn.ID(), q)
 			if strings.Contains(strings.ToLower(q), "password") {
 				passwordTryCount++
