@@ -876,6 +876,13 @@ func (t *Terminal) SetPrompt(prompt string) {
 	t.prompt = []rune(prompt)
 }
 
+func (t *Terminal) SetRawPrompt(prompt string) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	t.c.Write([]byte(prompt))
+}
+
 func (t *Terminal) clearAndRepaintLinePlusNPrevious(numPrevLines int) {
 	// Move cursor to column zero at the start of the line.
 	t.move(t.cursorY, 0, t.cursorX, 0)
